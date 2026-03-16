@@ -5,11 +5,13 @@ from agents.body import Body
 from agents.raw_sensors import RawSensors, RAW_INPUT_DIM
 from agents.internal_state import InternalState
 from agents.memory import MemorySystem
-from agents.self_model import SelfModel
+from agents.self_model import SelfModel, MortalitySelfModel
 from agents.concept_hypothesis import ConceptHypothesisSystem, NUM_BODY_FEATURES
 from agents.meta_hypothesis import MetaHypothesisSystem
 from agents.morphology import Morphology
 from agents.composable_rules import ComposableRuleSystem
+from agents.symbol_system import SymbolCodebook
+from agents.discrete_language import DiscreteVocab
 from agents.genome import (
     get_trait, get_nn_weights, get_arch_genes, get_morph_genes,
     get_concept_genes, random_genome, FIXED_GENE_COUNT
@@ -84,6 +86,33 @@ class Agent:
         from agents.hypothesis import HypothesisSystem
         self.hypotheses = HypothesisSystem(max_hypotheses=8, action_dim=cfg.action_dim)
 
+        # Phase 1: Symbol system (VQ codebook)
+        n_symbols = int(round(get_trait(genome, "n_symbols")))
+        n_symbol_slots = int(round(get_trait(genome, "n_symbol_slots")))
+        symbol_lr = get_trait(genome, "symbol_lr")
+        self.symbols = SymbolCodebook(
+            self.bottleneck_size, n_symbols=n_symbols,
+            n_slots=n_symbol_slots, lr=symbol_lr,
+        )
+
+        # Phase 2: Recursive thought depth gate
+        self.depth_gate_threshold = get_trait(genome, "depth_gate_threshold")
+
+        # Phase 3: Discrete language
+        vocab_active = int(round(get_trait(genome, "vocab_active")))
+        utterance_length = int(round(get_trait(genome, "utterance_length")))
+        listen_weight = get_trait(genome, "listen_weight")
+        self.discrete_vocab = DiscreteVocab(
+            self.bottleneck_size, vocab_active=vocab_active,
+            utterance_length=utterance_length, listen_weight=listen_weight,
+        )
+
+        # Phase 4: Mortality awareness
+        mortality_sensitivity = get_trait(genome, "mortality_sensitivity")
+        self.mortality = MortalitySelfModel(
+            self.bottleneck_size, mortality_sensitivity=mortality_sensitivity,
+        )
+
         nn_weights = get_nn_weights(genome)
         n_policy = self.brain.policy_param_count
         if len(nn_weights) >= n_policy:
@@ -101,6 +130,8 @@ class Agent:
         self._hyp_rng = None
         self._feature_vec = None
         self._heard_signal = np.zeros(cfg.signal_dim)
+        self._heard_tokens = None  # TokenUtterance or None
+        self._last_spoken_tokens = None  # np.ndarray or None
 
     def _ensure_systems(self, rng):
         if len(self.concept_hyp.hypotheses) == 0:
@@ -112,13 +143,14 @@ class Agent:
 
 
     def perceive(self, grid, light_level, rng, season=0.0, physics=None,
-                 nearby_agents=0, heard_signal=None):
+                 nearby_agents=0, heard_signal=None, ecology=None,
+                 structures=None):
         self._hyp_rng = rng
         self._ensure_systems(rng)
 
         self._raw_input = self.sensors.perceive(
             grid, self.body.position, self.body.heading, light_level, rng,
-            physics=physics,
+            physics=physics, ecology=ecology,
         )
 
         if heard_signal is not None:
@@ -149,6 +181,27 @@ class Agent:
             self.internal.temperature_comfort,
         ])
 
+        # Gather v2 features from physics/ecology for hypothesis system
+        v2 = {}
+        x, y = self.body.x, self.body.y
+        if physics is not None:
+            ts = physics.get_terrain_sensor(x, y)
+            v2["water"] = ts[1]
+            v2["height"] = ts[0]
+            v2["slope"] = ts[2]
+            v2["earthquake"] = ts[3]
+            v2["fertility"] = float(physics.fertility[x % physics.w, y % physics.h])
+            v2["radiation_effect"] = physics.hidden.get_radiation_damage(x, y)
+            v2["soil_ph_effect"] = physics.hidden.get_plant_growth_modifier(x, y)
+            v2["magnetic_strength"] = physics.hidden.get_magnetic_strength(x, y)
+            ss = physics.get_substance_sensor(x, y, n=1)
+            v2["substance_top_conc"] = ss[1] if len(ss) > 1 else 0.0
+        if ecology is not None:
+            v2["plant_density"] = ecology.get_plant_density(x, y)
+            v2["herbivore_density"] = ecology.get_herbivore_density(x, y)
+            v2["predator_density"] = ecology.get_predator_density(x, y)
+            v2["dead_matter"] = float(ecology.dead_matter[x % ecology.w, y % ecology.h])
+
         self._feature_vec = self.hypotheses.build_feature_vector(
             self._raw_input[:40],
             self.body.energy, self.body.health,
@@ -157,7 +210,17 @@ class Agent:
             mineral_carried=self.body.mineral_carried,
             speed=self.body.speed,
             temp_comfort=self.internal.temperature_comfort,
+            age_ratio=self.body.age / max(1, self._cfg.max_lifespan),
+            **v2,
         )
+
+        # Read inscriptions from nearby structures
+        self._read_inscriptions = []
+        if structures is not None:
+            inscriptions = structures.read_inscriptions(x, y)
+            for insc in inscriptions:
+                decoded = self.discrete_vocab.decode_utterance(insc.tokens)
+                self._read_inscriptions.append(decoded)
 
 
     def prepare_context(self):
@@ -174,6 +237,28 @@ class Agent:
         experience = np.concatenate([self._raw_input, self.body.get_proprioception()])
         mem_summary = self.memory.get_summary(experience)
 
+        # Phase 4: Mortality awareness feeds into context
+        mortality_vec = np.array([
+            self.mortality.survival_prob,
+            self.mortality.time_to_death,
+            self.mortality.get_death_awareness(),
+        ])
+
+        # Phase 3: Decoded token meaning from heard utterance
+        heard_meaning = np.zeros(self.bottleneck_size)
+        if self._heard_tokens is not None:
+            heard_meaning = self.discrete_vocab.decode_utterance(self._heard_tokens.tokens)
+
+        # Inscription reading: average decoded meanings from structures
+        if hasattr(self, '_read_inscriptions') and self._read_inscriptions:
+            insc_sum = np.zeros(self.bottleneck_size)
+            for decoded in self._read_inscriptions:
+                n = min(len(decoded), self.bottleneck_size)
+                insc_sum[:n] += decoded[:n]
+            insc_sum /= len(self._read_inscriptions)
+            # Blend inscription knowledge into heard meaning
+            heard_meaning = heard_meaning + insc_sum * 0.5
+
         self._context = np.concatenate([
             self.body.get_proprioception(),
             self.internal.as_vector(),
@@ -181,6 +266,8 @@ class Agent:
             self_prediction,
             self._heard_signal,
             self._extra_sensor,
+            mortality_vec,
+            heard_meaning[:min(4, len(heard_meaning))],  # first 4 dims of decoded meaning
         ])
         return self._context
 
@@ -194,6 +281,10 @@ class Agent:
         self._value = value
         self._action = actions.copy()
         self._think_steps_used = 0
+
+        # Phase 1: Quantize concepts into discrete symbols
+        self.symbols.quantize(concepts)
+        self.symbols.learn(concepts)
 
         concept_bias = self.concept_hyp.get_action_bias(concepts, self._body_features)
         comp_bias = np.zeros(len(self._action))
@@ -211,10 +302,16 @@ class Agent:
 
         self._prev_value = self._value
         self._action, self._value, self._think_steps_used = self.brain.think(
-            self._raw_input, self._context
+            self._raw_input, self._context,
+            depth_gate_threshold=self.depth_gate_threshold,
         )
 
         concepts = self.brain.get_concepts()
+
+        # Phase 1: Quantize concepts into discrete symbols
+        self.symbols.quantize(concepts)
+        self.symbols.learn(concepts)
+
         concept_bias = self.concept_hyp.get_action_bias(concepts, self._body_features)
 
         comp_bias = np.zeros(len(self._action))
@@ -234,11 +331,24 @@ class Agent:
         a = self._action
         speed = self.morphology.speed_multiplier
         utterance = a[8:12] if len(a) >= 12 else np.zeros(self._cfg.signal_dim)
+
+        # Phase 3: Discrete token utterance
+        speak_intent = float(a[8]) if len(a) > 8 else 0.0
+        concepts = self.brain.get_concepts()
+        token_utterance = self.discrete_vocab.encode_utterance(concepts, speak_intent)
+        if token_utterance is not None:
+            self._last_spoken_tokens = token_utterance.copy()
+
+        # Phase 4: Mortality-modulated reproduction threshold
+        reproduce_intent = float(a[3]) > 0.5
+        if self.mortality.survival_prob < 0.3 and self.mortality.mortality_sensitivity > 0.5:
+            reproduce_intent = reproduce_intent or float(a[3]) > 0.2
+
         return {
             "move_dx": float(a[0]) * speed,
             "move_dy": float(a[1]) * speed,
             "eat": float(a[2]) > 0,
-            "reproduce": float(a[3]) > 0.5,
+            "reproduce": reproduce_intent,
             "signal": float((a[4] + 1) / 2) * self.morphology.visibility,
             "turn": float(a[5]) * 0.3,
             "collect_mineral": float(a[6]) > 0 if len(a) > 6 else False,
@@ -247,6 +357,8 @@ class Agent:
             "deposit": float(a[2]) > 0.8 and self.body.energy > 0.5,
             "withdraw": float(a[2]) > 0 and self.body.energy < 0.3,
             "utterance": utterance,
+            "token_utterance": token_utterance,
+            "inscribe": speak_intent > 0.5 and float(a[7]) > 0.5 if len(a) > 7 else False,
         }
 
     def _get_build_action(self, a) -> int:
@@ -261,7 +373,10 @@ class Agent:
 
 
     def update(self, reward, energy_gained=0.0, damage_taken=0.0,
-               temperature=0.5, mineral_found=0.0, toxin_exposure=0.0):
+               temperature=0.5, mineral_found=0.0, toxin_exposure=0.0,
+               plant_found=0.0, predator_near=0.0, substance_conc=0.0,
+               water_here=0.0, height_here=0.0, radiation_dmg=0.0,
+               medicine_result=0.0, fertility_here=0.0):
         self.ticks_alive += 1
         self.total_reward += reward
 
@@ -278,11 +393,32 @@ class Agent:
 
         self.brain.learn_world_model(self.brain.get_concepts())
 
+        # Phase 4: Mortality update
+        self.mortality.update_trends(self.body.energy, self.body.health, effective_damage)
+        concepts = self.brain.get_concepts()
+        age_ratio = self.body.age / max(1, self._cfg.max_lifespan)
+        self.mortality.predict_survival(concepts, self.body.energy, self.body.health, age_ratio)
+        self.mortality.learn_from_survival(survived=True, learning_rate=self.learning_rate)
+
+        # Phase 3: Discrete language grounding
+        if self._last_spoken_tokens is not None:
+            for tid in self._last_spoken_tokens:
+                self.discrete_vocab.ground_speaker(int(tid), concepts, lr=self.learning_rate)
+            self._last_spoken_tokens = None
+        if self._heard_tokens is not None:
+            outcome_good = energy_gained > 0 or effective_damage < 0.01
+            for tid in self._heard_tokens.tokens:
+                self.discrete_vocab.ground_listener(
+                    int(tid), concepts, outcome_good, lr=self.learning_rate * 0.5)
+            self._heard_tokens = None
+
         experience = np.concatenate([self._raw_input, self.body.get_proprioception()])
         self.memory.store_experience(experience, reward)
 
         concepts = self.brain.get_concepts()
-        self.concept_hyp.test_all(concepts, self._body_features, energy_gained, effective_damage)
+        self.concept_hyp.test_all(concepts, self._body_features, energy_gained, effective_damage,
+                                  plant_found=plant_found, predator_near=predator_near,
+                                  water_found=water_here, substance_useful=substance_conc)
 
         if self._feature_vec is not None:
             outcome_vec = np.array([
@@ -292,6 +428,10 @@ class Agent:
                 1.0 if effective_damage < 0.001 else 0.0,
                 mineral_found, toxin_exposure,
                 abs(temperature - 0.5) * 2,
+                plant_found, predator_near, substance_conc,
+                water_here, height_here, 0.0,  # reaction_seen placeholder
+                0.0,  # structure_nearby placeholder
+                radiation_dmg, medicine_result, fertility_here,
             ])
             self.hypotheses.test_hypotheses(self._feature_vec, outcome_vec)
             self.composable.test_rules(self._feature_vec, outcome_vec)

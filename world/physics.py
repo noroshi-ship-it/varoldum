@@ -1,34 +1,9 @@
 
 import numpy as np
 from config import Config
-
-
-CH_TEMPERATURE = 4
-CH_RESOURCE_B = 5
-CH_RESOURCE_C = 6
-CH_SCENT = 7
-CH_FERTILITY = 8
-NUM_PHYSICS_CHANNELS = 9
-
-
-class ChemistryRule:
-    def __init__(self, input_a: int, input_b: int, output: int,
-                 threshold_a: float, threshold_b: float, output_amount: float,
-                 name: str):
-        self.input_a = input_a
-        self.input_b = input_b
-        self.output = output
-        self.threshold_a = threshold_a
-        self.threshold_b = threshold_b
-        self.output_amount = output_amount
-        self.name = name
-
-
-CHEMISTRY_RULES = [
-    ChemistryRule(0, 5, -1, 0.3, 0.3, 0.2, "food+mineral=medicine"),
-    ChemistryRule(5, 6, 8, 0.2, 0.2, 0.4, "mineral+toxin=fertilizer"),
-    ChemistryRule(4, 0, -2, 0.7, 0.5, 0.1, "heat+food=spoilage"),
-]
+from world.chemistry import Chemistry
+from world.terrain import Terrain
+from world.hidden_physics import HiddenPhysics
 
 
 class Physics:
@@ -39,11 +14,17 @@ class Physics:
         self.w = cfg.world_width
         self.h = cfg.world_height
 
-        self.temperature = np.zeros((self.w, self.h))
-        self.mineral = np.zeros((self.w, self.h))
-        self.toxin = np.zeros((self.w, self.h))
-        self.scent = np.zeros((self.w, self.h))
-        self.fertility = np.ones((self.w, self.h)) * 0.5
+        self.temperature = np.zeros((self.w, self.h), dtype=np.float32)
+        self.mineral = np.zeros((self.w, self.h), dtype=np.float32)
+        self.toxin = np.zeros((self.w, self.h), dtype=np.float32)
+        self.scent = np.zeros((self.w, self.h), dtype=np.float32)
+        self.fertility = np.ones((self.w, self.h), dtype=np.float32) * 0.5
+
+        # New systems
+        self.chemistry = Chemistry(self.w, self.h, cfg.n_substances, rng)
+        self.terrain = Terrain(self.w, self.h, rng)
+        self.hidden = HiddenPhysics(self.w, self.h, rng)
+        self.hidden.setup_shield(self.chemistry)
 
         self._init_temperature()
         self._init_minerals()
@@ -80,10 +61,32 @@ class Physics:
 
     def update(self, tick: int, season_phase: float, grid_resources: np.ndarray):
         self._update_temperature(season_phase)
-        self._update_chemistry(grid_resources)
+        self._update_legacy_chemistry(grid_resources)
         self._update_scent()
         self._update_fertility(grid_resources)
         self._update_toxin_spread()
+
+        # New systems
+        self.chemistry.update(tick, self.temperature)
+        self.terrain.update(tick, self.chemistry)
+        self.hidden.update(tick, self.temperature, self.chemistry,
+                          self.terrain.recent_earthquake)
+
+        # Height affects temperature (lapse rate: higher = colder)
+        if tick % 20 == 0:
+            lapse = self.terrain.height * 0.15
+            self.temperature -= lapse * 0.01
+
+        # Bridge: sync legacy mineral/toxin with chemistry substances
+        # Mineral = sum of mineral-category substances (4-7)
+        self.mineral = np.maximum(self.mineral,
+            np.sum(self.chemistry.substances[:, :, 4:8], axis=2) * 0.5)
+        np.clip(self.mineral, 0, 1, out=self.mineral)
+        # Toxin = sum of toxic substances weighted by toxicity property
+        toxicity_weights = self.chemistry.substance_props[:, Chemistry.PROP_TOXICITY]
+        self.toxin = np.maximum(self.toxin,
+            np.einsum('ijk,k->ij', self.chemistry.substances, toxicity_weights) * 0.3)
+        np.clip(self.toxin, 0, 1, out=self.toxin)
 
     def _update_temperature(self, season_phase: float):
         season_offset = 0.2 * np.sin(2 * np.pi * season_phase)
@@ -95,7 +98,7 @@ class Physics:
         self.temperature += self._rng.normal(0, 0.002, (self.w, self.h))
         np.clip(self.temperature, 0, 1, out=self.temperature)
 
-    def _update_chemistry(self, grid_resources: np.ndarray):
+    def _update_legacy_chemistry(self, grid_resources: np.ndarray):
         food = grid_resources[:, :, 0]
 
         hot_mask = self.temperature > 0.7
@@ -177,3 +180,24 @@ class Physics:
     def get_metabolism_modifier(self, x: int, y: int) -> float:
         temp = self.temperature[x % self.w, y % self.h]
         return 0.7 + 0.6 * temp
+
+    def get_terrain_sensor(self, x: int, y: int) -> np.ndarray:
+        """Get terrain data at position: [height, water, slope, earthquake].
+        Returns (4,) array."""
+        return np.array([
+            self.terrain.get_height(x, y),
+            self.terrain.get_water(x, y),
+            self.terrain.get_slope(x, y),
+            self.terrain.get_earthquake_intensity(x, y),
+        ], dtype=np.float32)
+
+    def get_substance_sensor(self, x: int, y: int, n=4) -> np.ndarray:
+        """Get top-n substance concentrations at position as sensor input.
+        Returns (n*2,) array: [idx0/16, conc0, idx1/16, conc1, ...]
+        Normalized so indices are in [0,1] range."""
+        indices, concs = self.chemistry.get_top_substances(x, y, n)
+        result = np.zeros(n * 2, dtype=np.float32)
+        for i in range(min(n, len(indices))):
+            result[i * 2] = indices[i] / max(1, self.chemistry.n_substances)
+            result[i * 2 + 1] = concs[i]
+        return result

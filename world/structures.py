@@ -33,9 +33,25 @@ DURABILITY = {
 }
 
 
+MAX_INSCRIPTIONS = 5
+
+
+class Inscription:
+    """A piece of symbolic knowledge left on a structure.
+    Contains token sequence + the concept embedding at time of writing."""
+    __slots__ = ['tokens', 'concept_embedding', 'author_lineage', 'tick_written']
+
+    def __init__(self, tokens: np.ndarray, concept_embedding: np.ndarray,
+                 author_lineage: int, tick: int):
+        self.tokens = tokens.copy()
+        self.concept_embedding = concept_embedding.copy()
+        self.author_lineage = author_lineage
+        self.tick_written = tick
+
+
 class Structure:
     __slots__ = ['stype', 'x', 'y', 'builder_lineage', 'age', 'durability',
-                 'stored_resource', 'signal_value']
+                 'stored_resource', 'signal_value', 'inscriptions']
 
     def __init__(self, stype: int, x: int, y: int, builder_lineage: int):
         self.stype = stype
@@ -46,6 +62,7 @@ class Structure:
         self.durability = DURABILITY.get(stype, 1000)
         self.stored_resource = 0.0
         self.signal_value = 0.0
+        self.inscriptions: list[Inscription] = []
 
 
 class StructureManager:
@@ -130,6 +147,26 @@ class StructureManager:
     def get_nest_bonus(self, x: int, y: int) -> bool:
         s = self.get_at(x, y)
         return s is not None and s.stype == StructureType.NEST
+
+    def inscribe(self, x: int, y: int, tokens: np.ndarray,
+                  concept_embedding: np.ndarray, author_lineage: int, tick: int) -> bool:
+        """Write tokens + concept embedding onto a nearby structure.
+        This is how agents leave persistent knowledge in the world."""
+        s = self.get_at(x, y)
+        if s is None:
+            return False
+        if len(s.inscriptions) >= MAX_INSCRIPTIONS:
+            # Overwrite oldest
+            s.inscriptions.pop(0)
+        s.inscriptions.append(Inscription(tokens, concept_embedding, author_lineage, tick))
+        return True
+
+    def read_inscriptions(self, x: int, y: int) -> list[Inscription]:
+        """Read all inscriptions on a structure at this position."""
+        s = self.get_at(x, y)
+        if s is None:
+            return []
+        return s.inscriptions
 
     def get_structure_sensor(self, x: int, y: int) -> np.ndarray:
         stype = self.get_type_at(x, y)

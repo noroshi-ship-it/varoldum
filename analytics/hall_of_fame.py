@@ -114,10 +114,10 @@ class HallOfFame:
 
         agent_data = {
             "age": age, "children": children, "generation": gen,
-            "lineage_id": lid, "wm_accuracy": round(wm_acc, 4),
-            "think_steps": think, "total_reward": round(reward, 2),
+            "lineage_id": lid, "wm_accuracy": round(float(wm_acc), 4),
+            "think_steps": think, "total_reward": round(float(reward), 2),
             "bottleneck_size": agent.bottleneck_size,
-            "best_concept_acc": round(best_concept_acc, 4),
+            "best_concept_acc": round(float(best_concept_acc), 4),
             "best_concept_rule": best_concept_desc,
         }
 

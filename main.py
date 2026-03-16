@@ -13,11 +13,13 @@ from utils import rng as rng_module
 from world.grid import Grid
 from world.environment import Environment
 from world.physics import Physics
+from world.ecology import Ecology
 from world.social import SocialSystem
 from world.structures import StructureManager, StructureType, BUILD_COST
 from world.culture import CultureSystem
 from agents.agent_v4 import Agent
 from agents.language import ProtoLanguage
+from agents.discrete_language import DiscreteLanguageSystem
 from evolution.reproduction import reproduce_asexual, reproduce_sexual
 from analytics.metrics import population_stats, genome_diversity, behavioral_complexity, trait_distribution
 from analytics.consciousness_probes import probe_all
@@ -102,7 +104,7 @@ def count_nearby(agent, agents, radius=4):
     return count
 
 
-def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng):
+def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng, ecology=None, tick=0):
     new_agents = []
     agent_data = {}
 
@@ -135,6 +137,11 @@ def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng):
             farm_bonus = structures.get_farm_bonus(x, y)
             if farm_bonus > 0:
                 consumed *= (1.0 + farm_bonus)
+            if ecology is not None:
+                plant_nut, plant_tox = ecology.consume_plants(x, y, amount=0.1)
+                consumed += plant_nut
+                agent.body.take_damage(plant_tox * 0.3)
+                data["damage"] += plant_tox * 0.3
             agent.body.eat(consumed)
             data["energy_gained"] = consumed
 
@@ -178,12 +185,31 @@ def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng):
         toxin = physics.get_toxin(x, y)
         toxin_dmg = toxin * 0.05
         agent.body.take_damage(toxin_dmg)
+        if ecology is not None:
+            pred_danger = ecology.get_predator_danger(x, y)
+            if pred_danger > 0.01 and evo_rng.random() < pred_danger:
+                pred_dmg = pred_danger * 0.3
+                agent.body.take_damage(pred_dmg)
+                data["damage"] += pred_dmg
+
+        # Hidden radiation damage (agents feel it but can't see the source)
+        rad_dmg = physics.hidden.get_radiation_damage(x, y)
+        if rad_dmg > 0:
+            agent.body.take_damage(rad_dmg)
+            data["damage"] += rad_dmg
+
         data["toxin"] = toxin
-        data["damage"] = hazard_dmg + toxin_dmg + trap_dmg
+        data["damage"] += hazard_dmg + toxin_dmg + trap_dmg
 
         if action["signal"] > 0.1:
             grid.stamp_agent(x, y, action["signal"])
         physics.stamp_scent(x, y, 0.3)
+
+        # Inscription: write tokens onto nearby structure
+        if action.get("inscribe") and action.get("token_utterance") is not None:
+            concepts = agent.brain.get_concepts()
+            structures.inscribe(x, y, action["token_utterance"],
+                                concepts, agent.lineage_id, tick)
 
         if action["reproduce"] and agent.can_reproduce():
             mate = find_mate(agent, agents, cfg)
@@ -268,7 +294,9 @@ def main():
     social = SocialSystem(cfg.world_width, cfg.world_height)
     structures = StructureManager(cfg.world_width, cfg.world_height)
     culture = CultureSystem()
+    ecology = Ecology(cfg.world_width, cfg.world_height, rng=world_rng)
     language = ProtoLanguage(cfg.world_width, cfg.world_height, cfg.hear_radius)
+    discrete_lang = DiscreteLanguageSystem(cfg.world_width, cfg.world_height, cfg.hear_radius)
 
     agents: list[Agent] = []
     if args.resume and ckpt:
@@ -317,6 +345,8 @@ def main():
         t0 = time.time()
         env.update(tick)
         physics.update(tick, env.season_phase, grid.cells)
+        ecology.update(tick, physics.temperature, physics.terrain.water, env.light_level,
+                       soil_ph=physics.hidden.soil_ph)
         structures.update(tick)
         grid.clear_agent_layer()
         for agent in agents:
@@ -328,9 +358,14 @@ def main():
         for agent in agents:
             nearby = count_nearby(agent, agents, radius=4)
             heard = language.get_strongest_signal(agent, tick)
+            # Phase 3: Pass heard discrete tokens
+            heard_tokens = discrete_lang.get_nearest_utterance(
+                agent.id, agent.body.position, tick)
+            agent._heard_tokens = heard_tokens
             agent.perceive(grid, env.light_level, agent_rng,
                           season=env.season_phase, physics=physics,
-                          nearby_agents=nearby, heard_signal=heard)
+                          nearby_agents=nearby, heard_signal=heard,
+                          ecology=ecology, structures=structures)
         t2 = time.time()
 
         if use_gpu:
@@ -357,7 +392,7 @@ def main():
         t3 = time.time()
 
         new_agents, agent_data = resolve_actions(
-            grid, physics, structures, agents, actions, cfg, evo_rng
+            grid, physics, structures, agents, actions, cfg, evo_rng, ecology=ecology, tick=tick
         )
         t3b = time.time()
         profile_accum["actions"] += t3b - t3
@@ -367,7 +402,14 @@ def main():
                 utterance = action.get("utterance", None)
                 if utterance is not None:
                     language.broadcast(agent, utterance, tick)
+                # Phase 3: Discrete token broadcast
+                token_utt = action.get("token_utterance", None)
+                if token_utt is not None:
+                    discrete_lang.broadcast(
+                        agent.id, agent.body.position, agent.lineage_id,
+                        token_utt, tick)
         language.cleanup(tick)
+        discrete_lang.cleanup(tick)
 
         social_rewards = social.resolve_social(agents, actions, tick)
 
@@ -395,8 +437,19 @@ def main():
             )
             reward += social_rewards.get(agent.id, 0)
 
+            x, y = agent.x, agent.y
             agent.update(reward, energy_gained=eg, damage_taken=dmg,
-                        temperature=temp, mineral_found=mineral, toxin_exposure=toxin)
+                        temperature=temp, mineral_found=mineral, toxin_exposure=toxin,
+                        plant_found=ecology.get_plant_density(x, y),
+                        predator_near=ecology.get_predator_density(x, y),
+                        substance_conc=float(physics.chemistry.substances[
+                            x % physics.w, y % physics.h].max()),
+                        water_here=physics.terrain.get_water(x, y),
+                        height_here=physics.terrain.get_height(x, y),
+                        radiation_dmg=physics.hidden.get_radiation_damage(x, y),
+                        medicine_result=medicine,
+                        fertility_here=float(physics.fertility[
+                            x % physics.w, y % physics.h]))
         t4 = time.time()
 
         profile_accum["world"] += t1 - t0
@@ -408,6 +461,14 @@ def main():
         dead = [a for a in agents if not a.is_alive]
         for a in dead:
             hall_of_fame.check_dead_agent(a, tick)
+            ecology.add_dead_matter(a.x, a.y, amount=0.15)
+            # Phase 4: Nearby agents observe death through concept similarity
+            dead_concepts = a.brain.get_concepts()
+            nearby_alive = _spatial.query(a.x, a.y, 6)
+            for observer in nearby_alive:
+                if observer.id != a.id and observer.is_alive:
+                    observer.mortality.observe_nearby_death(
+                        observer.brain.get_concepts(), dead_concepts, tick)
         deaths_this_period += len(dead)
         births_this_period += len(new_agents)
         agents = [a for a in agents if a.is_alive]
@@ -421,6 +482,11 @@ def main():
                 agents.append(Agent.create_random(cfg, pos, agent_rng))
 
         if tick % 10 == 0:
+            # Decomposer activity boosts soil fertility
+            decomp_boost = ecology.fauna[:, :, 2] * 0.02
+            physics.fertility += decomp_boost
+            np.clip(physics.fertility, 0, 2, out=physics.fertility)
+
             fertility_boost = physics.fertility.copy()
             for pos_key, s in structures.structures.items():
                 if s.stype == StructureType.FARM:
@@ -460,6 +526,12 @@ def main():
             n_complex_rules = 0
             max_complexity = 0
 
+            mean_symbol_entropy = 0.0
+            mean_survival_prob = 0.0
+            mean_death_awareness = 0.0
+            mean_thought_depth = 0.0
+            total_vocab_used = 0
+
             for a in agents:
                 mean_wm_acc += a.brain.cumulative_wm_accuracy
                 mean_think_steps += a.think_steps
@@ -473,6 +545,12 @@ def main():
                 n_complex_rules += comp_s["n_complex_rules"]
                 if comp_s["max_complexity"] > max_complexity:
                     max_complexity = comp_s["max_complexity"]
+                # Abstract thinking stats
+                mean_symbol_entropy += a.symbols.stats["symbol_entropy"]
+                mean_survival_prob += a.mortality.survival_prob
+                mean_death_awareness += a.mortality.get_death_awareness()
+                mean_thought_depth += a.brain._thought_depth
+                total_vocab_used += a.discrete_vocab.stats["vocab_used"]
 
             n = max(1, len(agents))
             mean_wm_acc /= n
@@ -481,6 +559,10 @@ def main():
             if n_with_concepts > 0:
                 mean_concept_acc /= n_with_concepts
             max_complexity_ever = max(max_complexity_ever, max_complexity)
+            mean_symbol_entropy /= n
+            mean_survival_prob /= n
+            mean_death_awareness /= n
+            mean_thought_depth /= n
 
             log_data = {
                 **stats, "diversity": diversity, **behavior,
@@ -504,7 +586,17 @@ def main():
                 "struct_built_ever": struct_stats.get("total_built_ever", 0),
                 "signals_sent": lang_stats["signals_sent"],
                 "signals_heard": lang_stats["signals_heard"],
+                **{f"chem_{k}": v for k, v in physics.chemistry.get_stats().items()},
+                **{f"terrain_{k}": v for k, v in physics.terrain.get_stats().items()},
+                **{f"eco_{k}": v for k, v in ecology.get_stats().items()},
+                **{f"hidden_{k}": v for k, v in physics.hidden.get_stats().items()},
                 "unique_signalers": lang_stats["unique_senders"],
+                "mean_symbol_entropy": mean_symbol_entropy,
+                "mean_survival_prob": mean_survival_prob,
+                "mean_death_awareness": mean_death_awareness,
+                "mean_thought_depth": mean_thought_depth,
+                "total_vocab_used": total_vocab_used,
+                **{f"dlang_{k}": v for k, v in discrete_lang.recent_stats.items()},
                 "best_generation_ever": best_generation_ever,
                 "max_complexity_ever": max_complexity_ever,
                 "births": births_this_period,

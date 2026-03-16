@@ -129,22 +129,22 @@ class ComposableRule:
             parts.append(c.describe())
         if self.temporal_condition:
             tc = self.temporal_condition
-            fname = Feature(tc["feature"]).name if tc["feature"] < 20 else "?"
+            fname = Feature(tc["feature"]).name if tc["feature"] < Feature.NUM_FEATURES else "?"
             comp = ">" if tc["comp"] == 0 else "<"
             parts.append(f"{fname} {comp} {tc['thresh']:.2f} [{tc['n_ago']}t ago]")
         if self.count_condition:
             cc = self.count_condition
-            fname = Feature(cc["feature"]).name if cc["feature"] < 20 else "?"
+            fname = Feature(cc["feature"]).name if cc["feature"] < Feature.NUM_FEATURES else "?"
             parts.append(f"COUNT({fname})>={cc['min_count']} in {cc.get('window',10)}t")
         if self.trend_condition:
             trc = self.trend_condition
-            fname = Feature(trc["feature"]).name if trc["feature"] < 20 else "?"
+            fname = Feature(trc["feature"]).name if trc["feature"] < Feature.NUM_FEATURES else "?"
             direction = "rising" if trc["direction"] > 0 else "falling"
             parts.append(f"TREND({fname})={direction}")
         if self.chain_rule_idx >= 0:
             parts.append(f"REQUIRES rule#{self.chain_rule_idx}")
 
-        outcome_name = PredictedOutcome(self.outcome).name if self.outcome < 10 else "?"
+        outcome_name = PredictedOutcome(self.outcome).name if self.outcome < PredictedOutcome.NUM_OUTCOMES else "?"
         cond_str = " AND ".join(parts)
         return (f"IF {cond_str} THEN {outcome_name} "
                 f"[acc={self.accuracy:.2f}, n={self.tests}, "
@@ -153,22 +153,25 @@ class ComposableRule:
 
 class ComposableRuleSystem:
 
-    def __init__(self, max_rules: int = 6, action_dim: int = 8):
+    def __init__(self, max_rules: int = 24, action_dim: int = 8):
         self.max_rules = max_rules
         self.action_dim = action_dim
         self.rules: list[ComposableRule] = []
-        self.temporal = TemporalBuffer(window_size=30)
+        self.temporal = TemporalBuffer(window_size=100)
         self._generation_count = 0
 
     def init_random(self, rng: np.random.Generator):
+        n_feat = int(Feature.NUM_FEATURES)
+        n_comp = int(Comparator.NUM_COMPARATORS)
+        n_out = int(PredictedOutcome.NUM_OUTCOMES)
         for _ in range(self.max_rules):
             rule = ComposableRule()
             rule.conditions = [Condition(
-                int(rng.integers(0, 20)),
-                int(rng.integers(0, 2)),
+                int(rng.integers(0, n_feat)),
+                int(rng.integers(0, n_comp)),
                 float(rng.uniform(0.1, 0.9)),
             )]
-            rule.outcome = int(rng.integers(0, 10))
+            rule.outcome = int(rng.integers(0, n_out))
             rule.action_bias = rng.standard_normal(self.action_dim) * 0.2
             self.rules.append(rule)
 
@@ -232,22 +235,25 @@ class ComposableRuleSystem:
             self.rules[i] = child
 
     def _mutate(self, parent: ComposableRule, rng: np.random.Generator) -> ComposableRule:
+        n_feat = int(Feature.NUM_FEATURES)
+        n_comp = int(Comparator.NUM_COMPARATORS)
+        n_out = int(PredictedOutcome.NUM_OUTCOMES)
         child = ComposableRule()
 
         child.conditions = []
         for c in parent.conditions:
             if rng.random() < 0.3:
                 child.conditions.append(Condition(
-                    c.feature if rng.random() > 0.2 else int(rng.integers(0, 20)),
-                    c.comparator if rng.random() > 0.3 else int(rng.integers(0, 2)),
+                    c.feature if rng.random() > 0.2 else int(rng.integers(0, n_feat)),
+                    c.comparator if rng.random() > 0.3 else int(rng.integers(0, n_comp)),
                     float(np.clip(c.threshold + rng.normal(0, 0.15), 0, 1)),
                 ))
             else:
                 child.conditions.append(Condition(c.feature, c.comparator, c.threshold))
 
-        if rng.random() < 0.1 and len(child.conditions) < 3:
+        if rng.random() < 0.1 and len(child.conditions) < 4:
             child.conditions.append(Condition(
-                int(rng.integers(0, 20)), int(rng.integers(0, 2)),
+                int(rng.integers(0, n_feat)), int(rng.integers(0, n_comp)),
                 float(rng.uniform(0.1, 0.9)),
             ))
 
@@ -259,10 +265,10 @@ class ComposableRuleSystem:
             child.temporal_condition = tc
         elif rng.random() < 0.08:
             child.temporal_condition = {
-                "feature": int(rng.integers(0, 20)),
-                "comp": int(rng.integers(0, 2)),
+                "feature": int(rng.integers(0, n_feat)),
+                "comp": int(rng.integers(0, n_comp)),
                 "thresh": float(rng.uniform(0.1, 0.9)),
-                "n_ago": int(rng.integers(1, 10)),
+                "n_ago": int(rng.integers(1, 15)),
             }
 
         if parent.count_condition and rng.random() > 0.2:
@@ -272,18 +278,18 @@ class ComposableRuleSystem:
             child.count_condition = cc
         elif rng.random() < 0.06:
             child.count_condition = {
-                "feature": int(rng.integers(0, 20)),
-                "comp": int(rng.integers(0, 2)),
+                "feature": int(rng.integers(0, n_feat)),
+                "comp": int(rng.integers(0, n_comp)),
                 "thresh": float(rng.uniform(0.1, 0.9)),
-                "min_count": int(rng.integers(2, 6)),
-                "window": int(rng.integers(5, 20)),
+                "min_count": int(rng.integers(2, 8)),
+                "window": int(rng.integers(5, 40)),
             }
 
         if parent.trend_condition and rng.random() > 0.2:
             child.trend_condition = parent.trend_condition.copy()
         elif rng.random() < 0.06:
             child.trend_condition = {
-                "feature": int(rng.integers(0, 20)),
+                "feature": int(rng.integers(0, n_feat)),
                 "direction": int(rng.choice([-1, 1])),
                 "threshold": float(rng.uniform(0.01, 0.1)),
             }
@@ -293,7 +299,7 @@ class ComposableRuleSystem:
         elif rng.random() < 0.05 and len(self.rules) > 1:
             child.chain_rule_idx = int(rng.integers(0, len(self.rules)))
 
-        child.outcome = parent.outcome if rng.random() > 0.15 else int(rng.integers(0, 10))
+        child.outcome = parent.outcome if rng.random() > 0.15 else int(rng.integers(0, n_out))
         child.action_bias = parent.action_bias.copy()
         mask = rng.random(len(child.action_bias)) < 0.3
         child.action_bias[mask] += rng.normal(0, 0.2, size=mask.sum())

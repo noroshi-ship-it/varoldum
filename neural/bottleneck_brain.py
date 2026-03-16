@@ -74,6 +74,8 @@ class BottleneckBrain:
         self._wm_update_count = 0
         self.cumulative_wm_accuracy = 0.0
         self._pre_encoded = False
+        self._thought_depth = 0
+        self._thought_value_delta = 0.0
 
     def get_concepts(self):
         return self._last_bottleneck
@@ -120,7 +122,8 @@ class BottleneckBrain:
         predicted_next = self.wm_output_layer.forward(h)
         return np.tanh(predicted_next)
 
-    def think(self, raw_input: np.ndarray, context: np.ndarray) -> tuple[np.ndarray, float, int]:
+    def think(self, raw_input: np.ndarray, context: np.ndarray,
+              depth_gate_threshold: float = 0.0) -> tuple[np.ndarray, float, int]:
         actions, value = self.forward(raw_input, context)
         steps_used = 0
 
@@ -131,29 +134,50 @@ class BottleneckBrain:
         best_value = value
         concepts = self._last_bottleneck.copy()
 
+        # Save GRU state — thinking happens in a sandbox
+        saved_hidden = self.gru.h.copy()
+
+        ctx = np.zeros(self.context_dim)
+        n = min(len(context), self.context_dim)
+        ctx[:n] = context[:n]
+
         for step in range(self.think_steps):
             noise_scale = 0.3 / (1 + step)
             candidate = best_action + np.random.randn(self.action_dim) * noise_scale
             candidate = np.clip(candidate, -1, 1)
 
+            # Imagine next concepts from current concepts + candidate action
             imagined_next = self.imagine_step(concepts, candidate)
 
-            ctx = np.zeros(self.context_dim)
-            n = min(len(context), self.context_dim)
-            ctx[:n] = context[:n]
+            # RECURSIVE: pass imagined concepts through GRU (hidden updates)
             imagined_input = np.concatenate([imagined_next, ctx])
+            gru_out = self.gru.forward(imagined_input)
 
-            h_temp = self._last_hidden.copy()
-            combined = np.concatenate([imagined_input, h_temp])
-            imagined_value = float(self.value_layer.forward(h_temp)[0])
+            # Evaluate value from the recursively updated hidden state
+            imagined_value = float(self.value_layer.forward(gru_out)[0])
 
             confidence_bonus = 0.1 * (1.0 - min(1.0, self.world_prediction_error))
             imagined_value += confidence_bonus
 
+            improvement = imagined_value - best_value
             if imagined_value > best_value:
                 best_value = imagined_value
                 best_action = candidate
+                # Use imagined concepts for next depth level
+                concepts = imagined_next
             steps_used += 1
+
+            # Depth gate: stop if improvement is below threshold and not first step
+            if step > 0 and improvement < depth_gate_threshold:
+                break
+
+        # Restore GRU state — thinking was a sandbox
+        self.gru.h = saved_hidden
+        self._last_hidden = saved_hidden
+
+        # Store thought metadata for self-model
+        self._thought_depth = steps_used
+        self._thought_value_delta = best_value - value
 
         return best_action, best_value, steps_used
 

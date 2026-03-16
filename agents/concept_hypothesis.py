@@ -47,9 +47,14 @@ class ConceptHypothesis:
     ENERGY_DOWN = 1
     SAFE = 2
     DANGER = 3
-    NUM_OUTCOMES = 4
+    FIND_PLANT = 4
+    PREDATOR_NEAR = 5
+    FIND_WATER = 6
+    SUBSTANCE_USEFUL = 7
+    NUM_OUTCOMES = 8
 
-    OUTCOME_NAMES = ["ENERGY_UP", "ENERGY_DOWN", "SAFE", "DANGER"]
+    OUTCOME_NAMES = ["ENERGY_UP", "ENERGY_DOWN", "SAFE", "DANGER",
+                     "FIND_PLANT", "PREDATOR_NEAR", "FIND_WATER", "SUBSTANCE_USEFUL"]
 
     def __init__(self, conditions, outcome, action_bias):
         self.conditions = conditions
@@ -72,7 +77,8 @@ class ConceptHypothesis:
     def evaluate(self, concepts, body_features):
         return all(c.evaluate(concepts, body_features) for c in self.conditions)
 
-    def test(self, energy_delta, damage):
+    def test(self, energy_delta, damage, plant_found=0.0, predator_near=0.0,
+             water_found=0.0, substance_useful=0.0):
         self.tests += 1
         self.age += 1
         correct = False
@@ -84,6 +90,14 @@ class ConceptHypothesis:
             correct = damage < 0.001
         elif self.outcome == self.DANGER:
             correct = damage > 0.01
+        elif self.outcome == self.FIND_PLANT:
+            correct = plant_found > 0.1
+        elif self.outcome == self.PREDATOR_NEAR:
+            correct = predator_near > 0.05
+        elif self.outcome == self.FIND_WATER:
+            correct = water_found > 0.2
+        elif self.outcome == self.SUBSTANCE_USEFUL:
+            correct = substance_useful > 0.1
         if correct:
             self.successes += 1
 
@@ -95,7 +109,7 @@ class ConceptHypothesis:
 
 class ConceptHypothesisSystem:
 
-    def __init__(self, bottleneck_size: int, max_hyp: int = 8, action_dim: int = 8):
+    def __init__(self, bottleneck_size: int, max_hyp: int = 32, action_dim: int = 8):
         self.bottleneck_size = bottleneck_size
         self.max_hyp = max_hyp
         self.action_dim = action_dim
@@ -106,7 +120,7 @@ class ConceptHypothesisSystem:
             self.hypotheses.append(self._random_hyp(rng))
 
     def _random_hyp(self, rng):
-        n_conds = rng.integers(1, 4)
+        n_conds = rng.integers(1, 6)
         conditions = []
         for _ in range(n_conds):
             is_concept = rng.random() < 0.7
@@ -135,10 +149,13 @@ class ConceptHypothesisSystem:
             total *= 2.0 / norm
         return total
 
-    def test_all(self, concepts, body_features, energy_delta, damage):
+    def test_all(self, concepts, body_features, energy_delta, damage,
+                 plant_found=0.0, predator_near=0.0, water_found=0.0, substance_useful=0.0):
         for hyp in self.hypotheses:
             if hyp.evaluate(concepts, body_features):
-                hyp.test(energy_delta, damage)
+                hyp.test(energy_delta, damage, plant_found=plant_found,
+                         predator_near=predator_near, water_found=water_found,
+                         substance_useful=substance_useful)
 
     def evolve(self, rng):
         if len(self.hypotheses) < 2:
@@ -170,7 +187,7 @@ class ConceptHypothesisSystem:
                 new_conds.append(ConceptCondition(
                     c.feature_idx, c.comparator, c.threshold, c.is_concept))
 
-        if rng.random() < 0.1 and len(new_conds) < 3:
+        if rng.random() < 0.1 and len(new_conds) < 6:
             is_concept = rng.random() < 0.7
             idx = int(rng.integers(0, max(1, self.bottleneck_size) if is_concept else NUM_BODY_FEATURES))
             new_conds.append(ConceptCondition(idx, int(rng.integers(0, 2)),

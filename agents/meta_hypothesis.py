@@ -30,7 +30,7 @@ class MetaRule:
 
     def describe(self, base_rule_desc: str) -> str:
         from agents.hypothesis import Feature
-        fname = Feature(self.context_feature).name if self.context_feature < 20 else "?"
+        fname = Feature(self.context_feature).name if self.context_feature < 40 else "?"
         comp = ">" if self.context_comparator == 0 else "<"
         return (f"META: [{base_rule_desc}] works better WHEN "
                 f"{fname} {comp} {self.context_threshold:.2f} "
@@ -52,7 +52,7 @@ class ExperimentPlan:
 
 class MetaHypothesisSystem:
 
-    def __init__(self, max_meta_rules: int = 6, max_experiments: int = 2):
+    def __init__(self, max_meta_rules: int = 12, max_experiments: int = 3):
         self.meta_rules: list[MetaRule] = []
         self.max_meta_rules = max_meta_rules
         self.experiments: list[ExperimentPlan] = []
@@ -101,7 +101,7 @@ class MetaHypothesisSystem:
                 continue
             std = np.std(history)
             if std > 0.1:
-                context_feat = int(rng.integers(0, min(20, len(features))))
+                context_feat = int(rng.integers(0, min(40, len(features))))
                 context_comp = int(rng.integers(0, 2))
                 context_thresh = float(features[context_feat]) if context_feat < len(features) else 0.5
 

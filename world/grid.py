@@ -14,7 +14,7 @@ class Grid:
     def __init__(self, cfg: Config, rng: np.random.Generator):
         self.w = cfg.world_width
         self.h = cfg.world_height
-        self.cells = np.zeros((self.w, self.h, NUM_CHANNELS), dtype=np.float64)
+        self.cells = np.zeros((self.w, self.h, NUM_CHANNELS), dtype=np.float32)
         self._rng = rng
         self._cfg = cfg
 

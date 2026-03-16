@@ -56,7 +56,7 @@ def save_checkpoint(path: str, tick: int, agents: list, grid_cells: np.ndarray,
         "n_agents": len(agents),
         "max_generation": max((a.generation for a in agents), default=0),
         "mean_energy": float(np.mean([a.body.energy for a in agents])) if agents else 0,
-        "top_agent_reward": max((a.total_reward for a in agents), default=0),
+        "top_agent_reward": float(max((a.total_reward for a in agents), default=0)),
     }
     with open(summary_path, "w") as f:
         json.dump(summary, f, indent=2)

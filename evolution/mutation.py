@@ -2,7 +2,8 @@
 import numpy as np
 from agents.genome import (
     LOCI, NUM_TRAIT_GENES, ARCH_OFFSET, ARCH_COUNT,
-    MORPH_OFFSET, MORPH_COUNT, FIXED_GENE_COUNT, clamp_genome
+    MORPH_OFFSET, MORPH_COUNT, ABSTRACT_OFFSET, ABSTRACT_COUNT,
+    FIXED_GENE_COUNT, clamp_genome
 )
 
 
@@ -27,6 +28,12 @@ def mutate(genome: np.ndarray, rng: np.random.Generator) -> np.ndarray:
     for i in range(MORPH_COUNT):
         if rng.random() < 0.3:
             idx = MORPH_OFFSET + i
+            child[idx] += rng.normal(0, mutation_rate * 2)
+
+    # Abstract thinking genes
+    for i in range(ABSTRACT_COUNT):
+        if rng.random() < 0.3:
+            idx = ABSTRACT_OFFSET + i
             child[idx] += rng.normal(0, mutation_rate * 2)
 
     nn_start = FIXED_GENE_COUNT

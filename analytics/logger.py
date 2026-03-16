@@ -39,10 +39,10 @@ class Logger:
                     "id": a.id,
                     "generation": a.generation,
                     "age": a.body.age,
-                    "energy": a.body.energy,
-                    "total_reward": a.total_reward,
+                    "energy": float(a.body.energy),
+                    "total_reward": float(a.total_reward),
                     "children": a.children_count,
-                    "self_model_accuracy": a.self_model.cumulative_accuracy,
+                    "self_model_accuracy": float(a.self_model.cumulative_accuracy),
                     "genome_traits": a.genome[:12].tolist(),
                 }
                 for a in top

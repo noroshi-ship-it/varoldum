@@ -7,7 +7,7 @@ from world.grid import Grid
 
 PATCH_RADIUS = 2
 PATCH_SIZE = 2 * PATCH_RADIUS + 1
-RAW_CHANNELS = 8
+RAW_CHANNELS = 11
 RAW_INPUT_DIM = PATCH_SIZE * PATCH_SIZE * RAW_CHANNELS
 
 
@@ -23,7 +23,7 @@ class RawSensors:
         return RAW_INPUT_DIM
 
     def perceive(self, grid: Grid, position: np.ndarray, heading: float,
-                 light_level: float = 1.0, rng=None, physics=None) -> np.ndarray:
+                 light_level: float = 1.0, rng=None, physics=None, ecology=None) -> np.ndarray:
         cx, cy = int(position[0]), int(position[1])
         w, h = grid.w, grid.h
         stride = self._stride
@@ -56,6 +56,13 @@ class RawSensors:
                     patch[idx + 7] = phys[3]
                 else:
                     patch[idx + 4:idx + 8] = 0.0
+
+                if ecology is not None:
+                    patch[idx + 8] = ecology.get_plant_density(sx, sy)
+                    patch[idx + 9] = ecology.get_herbivore_density(sx, sy)
+                    patch[idx + 10] = ecology.get_predator_density(sx, sy)
+                else:
+                    patch[idx + 8:idx + 11] = 0.0
 
                 idx += RAW_CHANNELS
 

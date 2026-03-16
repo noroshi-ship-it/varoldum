@@ -51,6 +51,9 @@ class Config:
 
     think_energy_cost: float = 0.001
 
+    # Chemistry
+    n_substances: int = 16
+
     @property
     def sensor_channels(self) -> int:
         return 8
@@ -61,7 +64,7 @@ class Config:
 
     @property
     def raw_input_dim(self) -> int:
-        return 5 * 5 * 8
+        return 5 * 5 * 11
 
     @property
     def proprioception_dim(self) -> int:
@@ -87,6 +90,8 @@ class Config:
             + self.memory_summary_dim
             + self.internal_state_dim
             + self.signal_dim
+            + 3   # mortality: survival_prob, time_to_death, death_awareness
+            + 4   # decoded token meaning (first 4 dims)
         )
 
     @property
