@@ -1,44 +1,80 @@
 # varoldum
 
-neural agents in a grid. they eat, die, reproduce. sometimes they build stuff.
-
-there's a bottleneck encoder so each agent compresses the world into a few neurons. what those neurons "mean" is up to evolution. there's also a world model, proto-language, hypothesis system, etc. most of it probably doesn't work yet.
+artificial life simulation. agents with evolved neural networks live in a procedurally generated world. they perceive, decide, eat, build, communicate, reproduce, and die. what survives gets to define what matters.
 
 ## run
 
 ```bash
-pip install numpy
-python main.py --pop 500 --ticks 100000
+pip install -r requirements.txt
+python main.py
 ```
 
-gpu + bigger pop:
+quick test:
+```bash
+python main.py --no-gpu --pop 100 --width 96 --height 96 --ticks 1000
+```
+
+resume from checkpoint:
+```bash
+python main.py --resume
+```
+
+| flag | default | what it does |
+|------|---------|--------------|
+| `--ticks` | 50000 | simulation length |
+| `--seed` | 42 | random seed |
+| `--pop` | 200 | initial population |
+| `--width` | 192 | world width |
+| `--height` | 192 | world height |
+| `--no-gpu` | off | cpu-only mode |
+| `--output` | `output` | output directory |
+| `--resume` | - | resume from last checkpoint |
+| `--quiet` | off | suppress console output |
+
+## dashboard
 
 ```bash
-pip install torch
-python main.py --pop 2000 --ticks 10000000
+python dashboard.py output
 ```
 
-web dashboard (flask):
-
-```bash
-pip install flask
-python web/server.py --output output
-# localhost:8420
-```
+opens `http://localhost:8420`. population dynamics, intelligence metrics, ecology, social behavior, trait evolution, discovered rules, event timeline, hall of fame.
 
 ## what's in here
 
-- agents with evolved neural nets (bottleneck encoder, GRU policy, world model)
-- structures (nests, farms, walls, traps)
-- proto-language (4-float signals, no predefined meaning)
-- concept hypotheses (agents make IF-THEN guesses about their own neurons)
-- composable rules, meta-cognition, culture, teaching, imitation
-- hall of fame for dead agents who did something notable
-- web dashboard with live stats, gpu temp, population chart
+**agents**
+- bottleneck encoder brain with GRU. architecture is genome-controlled and evolvable
+- world model that learns to predict next environment state
+- self-model that predicts own internal state. prediction error drives curiosity
+- hypothesis system: agents form and test IF-THEN rules (40 features, 20 outcomes)
+- symbol codebook: continuous concepts discretized into composable symbols via VQ
+- discrete token language grounded in concept space. meanings drift with experience
+- mortality model: agents learn to predict own survival from concepts + body state
+- inscriptions: agents write token sequences onto structures. knowledge outlives the writer
 
-## will it produce consciousness?
+**world**
+- ecology: 4 plant species, 3 fauna types (herbivore, predator, decomposer)
+- chemistry: 16 substances with discoverable reactions and medicine recipes
+- terrain: tectonic plates, earthquakes, erosion, water flow
+- hidden physics: radiation, magnetic fields, underground resources, soil pH
+- structures: walls, farms, traps, nests, storage, markers
+- social: trade, combat, cooperation, teaching, imitation
 
-no.
+## output
+
+| file | content |
+|------|---------|
+| `population.csv` | per-tick stats |
+| `traits.csv` | genome trait distributions over time |
+| `consciousness.csv` | self-model accuracy, information integration |
+| `discovered_rules.csv` | IF-THEN rules agents learned |
+| `composable_rules.csv` | multi-condition rules |
+| `events.json` | milestones, extinctions, booms |
+| `hall_of_fame.json` | notable agents |
+| `checkpoint_*.pkl` | full state for resuming |
+
+## design principle
+
+physics (energy, damage, death, temperature) is hardcoded. everything above it — what counts as danger, food, a safe place, an ally — is learned. symbols, language meanings, mortality concepts, behavioral rules: all emerge from experience and evolution.
 
 ## license
 

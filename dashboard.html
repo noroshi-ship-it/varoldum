@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Varoldum Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+:root {
+  --bg: #0a0a0f;
+  --surface: #12121a;
+  --surface2: #1a1a2e;
+  --border: #2a2a3e;
+  --text: #e0e0e8;
+  --text2: #8888aa;
+  --accent: #6c5ce7;
+  --accent2: #00cec9;
+  --warn: #fdcb6e;
+  --danger: #e17055;
+  --success: #00b894;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; }
+h1 { font-size: 1.4rem; font-weight: 600; }
+h2 { font-size: 1.1rem; font-weight: 500; color: var(--accent); margin-bottom: 8px; }
+h3 { font-size: 0.9rem; font-weight: 500; color: var(--text2); margin-bottom: 6px; }
+
+.header {
+  padding: 16px 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 16px;
+}
+.header .title { display: flex; align-items: baseline; gap: 8px; }
+.header .version { color: var(--accent); font-size: 0.8rem; }
+.header .stats { margin-left: auto; display: flex; gap: 20px; font-size: 0.85rem; color: var(--text2); }
+.header .stats span { color: var(--text); font-weight: 600; }
+
+.tabs {
+  display: flex; background: var(--surface); border-bottom: 1px solid var(--border);
+  padding: 0 24px; gap: 4px; overflow-x: auto;
+}
+.tab {
+  padding: 10px 16px; cursor: pointer; color: var(--text2); font-size: 0.85rem;
+  border-bottom: 2px solid transparent; transition: all 0.2s; white-space: nowrap;
+}
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+.content { padding: 20px 24px; }
+.panel { display: none; }
+.panel.active { display: block; }
+
+.grid { display: grid; gap: 16px; }
+.grid-2 { grid-template-columns: 1fr 1fr; }
+.grid-3 { grid-template-columns: 1fr 1fr 1fr; }
+@media (max-width: 1200px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+}
+.card canvas { width: 100% !important; max-height: 300px; }
+.card-wide { grid-column: span 2; }
+@media (max-width: 1200px) { .card-wide { grid-column: span 1; } }
+
+.kpi-row { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+.kpi {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 16px;
+  min-width: 140px;
+  flex: 1;
+}
+.kpi .label { font-size: 0.75rem; color: var(--text2); margin-bottom: 4px; }
+.kpi .value { font-size: 1.5rem; font-weight: 700; }
+.kpi .sub { font-size: 0.7rem; color: var(--text2); margin-top: 2px; }
+
+.event-list { max-height: 500px; overflow-y: auto; }
+.event {
+  padding: 8px 12px;
+  border-left: 3px solid var(--border);
+  margin-bottom: 6px;
+  font-size: 0.82rem;
+  background: var(--surface2);
+  border-radius: 0 4px 4px 0;
+}
+.event .tick { color: var(--accent); font-weight: 600; margin-right: 8px; }
+.event.milestone { border-left-color: var(--accent); }
+.event.warning { border-left-color: var(--warn); }
+.event.danger { border-left-color: var(--danger); }
+.event .desc { color: var(--text2); margin-top: 2px; }
+
+.hof-entry {
+  padding: 10px 14px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 8px;
+}
+.hof-entry .name { font-weight: 600; color: var(--accent2); }
+.hof-entry .title { font-size: 0.85rem; margin-top: 2px; }
+.hof-entry .detail { font-size: 0.75rem; color: var(--text2); margin-top: 4px; }
+
+.rule-card {
+  padding: 8px 12px; margin-bottom: 6px;
+  background: var(--surface2); border-radius: 4px;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 0.78rem;
+}
+.rule-card .acc { color: var(--success); font-weight: 600; }
+.rule-card .agent { color: var(--text2); font-size: 0.7rem; }
+
+table {
+  width: 100%; border-collapse: collapse; font-size: 0.82rem;
+}
+th { text-align: left; padding: 8px; color: var(--text2); border-bottom: 1px solid var(--border); }
+td { padding: 6px 8px; border-bottom: 1px solid var(--border); }
+
+.loading { text-align: center; padding: 40px; color: var(--text2); }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="title">
+    <h1>VAROLDUM</h1>
+    <span class="version">Dashboard</span>
+  </div>
+  <div class="stats" id="headerStats"></div>
+</div>
+
+<div class="tabs" id="tabs">
+  <div class="tab active" data-panel="overview">Overview</div>
+  <div class="tab" data-panel="intelligence">Intelligence</div>
+  <div class="tab" data-panel="abstract">Abstract Thinking</div>
+  <div class="tab" data-panel="ecology">Ecology</div>
+  <div class="tab" data-panel="social">Social</div>
+  <div class="tab" data-panel="evolution">Evolution</div>
+  <div class="tab" data-panel="rules">Rules</div>
+  <div class="tab" data-panel="events">Events</div>
+  <div class="tab" data-panel="hof">Hall of Fame</div>
+</div>
+
+<div class="content">
+
+<!-- OVERVIEW -->
+<div class="panel active" id="panel-overview">
+  <div class="kpi-row" id="kpis"></div>
+  <div class="grid grid-2">
+    <div class="card"><h3>Population</h3><canvas id="chartPop"></canvas></div>
+    <div class="card"><h3>Energy & Health</h3><canvas id="chartEnergy"></canvas></div>
+    <div class="card"><h3>Births / Deaths</h3><canvas id="chartBirthDeath"></canvas></div>
+    <div class="card"><h3>Generation</h3><canvas id="chartGen"></canvas></div>
+  </div>
+</div>
+
+<!-- INTELLIGENCE -->
+<div class="panel" id="panel-intelligence">
+  <div class="grid grid-2">
+    <div class="card"><h3>World Model Accuracy</h3><canvas id="chartWM"></canvas></div>
+    <div class="card"><h3>Bottleneck Size</h3><canvas id="chartBN"></canvas></div>
+    <div class="card"><h3>Think Steps</h3><canvas id="chartThink"></canvas></div>
+    <div class="card"><h3>Concept Rules</h3><canvas id="chartConcept"></canvas></div>
+    <div class="card"><h3>Self-Model Accuracy</h3><canvas id="chartSelfModel"></canvas></div>
+    <div class="card"><h3>Consciousness Metrics</h3><canvas id="chartConsciousness"></canvas></div>
+  </div>
+</div>
+
+<!-- ABSTRACT THINKING -->
+<div class="panel" id="panel-abstract">
+  <div class="grid grid-2">
+    <div class="card"><h3>Symbol Entropy</h3><canvas id="chartSymbolEntropy"></canvas></div>
+    <div class="card"><h3>Survival Prediction</h3><canvas id="chartSurvival"></canvas></div>
+    <div class="card"><h3>Death Awareness</h3><canvas id="chartDeathAware"></canvas></div>
+    <div class="card"><h3>Thought Depth</h3><canvas id="chartThoughtDepth"></canvas></div>
+    <div class="card"><h3>Vocabulary Usage</h3><canvas id="chartVocab"></canvas></div>
+    <div class="card"><h3>Discrete Language Tokens</h3><canvas id="chartDLang"></canvas></div>
+  </div>
+</div>
+
+<!-- ECOLOGY -->
+<div class="panel" id="panel-ecology">
+  <div class="grid grid-2">
+    <div class="card"><h3>Flora & Fauna</h3><canvas id="chartEco"></canvas></div>
+    <div class="card"><h3>Chemistry</h3><canvas id="chartChem"></canvas></div>
+    <div class="card"><h3>Terrain</h3><canvas id="chartTerrain"></canvas></div>
+    <div class="card"><h3>Hidden Physics</h3><canvas id="chartHidden"></canvas></div>
+    <div class="card"><h3>Structures</h3><canvas id="chartStructures"></canvas></div>
+    <div class="card"><h3>Total Resources</h3><canvas id="chartResource"></canvas></div>
+  </div>
+</div>
+
+<!-- SOCIAL -->
+<div class="panel" id="panel-social">
+  <div class="grid grid-2">
+    <div class="card"><h3>Trade & Combat & Cooperation</h3><canvas id="chartSocial"></canvas></div>
+    <div class="card"><h3>Teaching & Imitation</h3><canvas id="chartCulture"></canvas></div>
+    <div class="card"><h3>Signals & Language</h3><canvas id="chartLang"></canvas></div>
+    <div class="card"><h3>Genetic Diversity</h3><canvas id="chartDiversity"></canvas></div>
+  </div>
+</div>
+
+<!-- EVOLUTION -->
+<div class="panel" id="panel-evolution">
+  <div class="grid grid-2">
+    <div class="card"><h3>Sensor Range</h3><canvas id="chartTraitSensor"></canvas></div>
+    <div class="card"><h3>Body Size</h3><canvas id="chartTraitBody"></canvas></div>
+    <div class="card"><h3>Mutation Rate</h3><canvas id="chartTraitMut"></canvas></div>
+    <div class="card"><h3>Learning Rate</h3><canvas id="chartTraitLR"></canvas></div>
+    <div class="card"><h3>Reproduction Threshold</h3><canvas id="chartTraitRepro"></canvas></div>
+    <div class="card"><h3>Sensitivity (Hunger / Fear / Curiosity)</h3><canvas id="chartTraitSens"></canvas></div>
+  </div>
+</div>
+
+<!-- RULES -->
+<div class="panel" id="panel-rules">
+  <div class="grid grid-2">
+    <div class="card" id="discoveredRules"><h2>Discovered Rules</h2></div>
+    <div class="card" id="composableRules"><h2>Composable Rules</h2></div>
+  </div>
+</div>
+
+<!-- EVENTS -->
+<div class="panel" id="panel-events">
+  <div class="card"><h2>Event History</h2><div class="event-list" id="eventList"></div></div>
+</div>
+
+<!-- HALL OF FAME -->
+<div class="panel" id="panel-hof">
+  <div class="grid grid-3" id="hofGrid"></div>
+</div>
+
+</div>
+
+<script>
+const COLORS = {
+  accent: '#6c5ce7', accent2: '#00cec9', warn: '#fdcb6e',
+  danger: '#e17055', success: '#00b894', blue: '#74b9ff',
+  pink: '#fd79a8', purple: '#a29bfe', orange: '#e17055',
+  teal: '#81ecec', green: '#55efc4', red: '#ff7675',
+};
+
+Chart.defaults.color = '#8888aa';
+Chart.defaults.borderColor = '#2a2a3e';
+Chart.defaults.font.size = 11;
+
+function makeChart(canvasId, config) {
+  const ctx = document.getElementById(canvasId);
+  if (!ctx) return null;
+  return new Chart(ctx, {
+    ...config,
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      aspectRatio: 1.8,
+      animation: false,
+      plugins: { legend: { labels: { boxWidth: 12, padding: 8 } } },
+      scales: {
+        x: { grid: { display: false }, ticks: { maxTicksLimit: 10 } },
+        y: { grid: { color: '#1a1a2e' } },
+        ...(config.options?.scales || {}),
+      },
+      ...config.options,
+    },
+  });
+}
+
+function timeSeries(data, key) {
+  return { x: data.map(d => d.tick), y: data.map(d => d[key] || 0) };
+}
+
+function dataset(label, data, key, color, opts = {}) {
+  const ts = timeSeries(data, key);
+  return {
+    label, data: ts.x.map((x, i) => ({ x, y: ts.y[i] })),
+    borderColor: color, backgroundColor: color + '20',
+    borderWidth: 1.5, pointRadius: 0, fill: opts.fill || false,
+    tension: 0.3, ...opts,
+  };
+}
+
+async function fetchJSON(url) {
+  const resp = await fetch(url);
+  if (!resp.ok) return null;
+  return resp.json();
+}
+
+async function loadAll() {
+  const [pop, traits, consciousness, rules, compRules, hof, events] = await Promise.all([
+    fetchJSON('/api/population'),
+    fetchJSON('/api/traits'),
+    fetchJSON('/api/consciousness'),
+    fetchJSON('/api/discovered_rules'),
+    fetchJSON('/api/composable_rules'),
+    fetchJSON('/api/hall_of_fame'),
+    fetchJSON('/api/events'),
+  ]);
+
+  if (!pop || pop.length === 0) {
+    document.querySelector('.content').innerHTML = '<div class="loading">No data found. Run the simulation first.</div>';
+    return;
+  }
+
+  const last = pop[pop.length - 1];
+  const maxPop = Math.max(...pop.map(d => d.count));
+  const maxGen = Math.max(...pop.map(d => d.max_generation));
+
+  // Header stats
+  document.getElementById('headerStats').innerHTML = `
+    Tick: <span>${last.tick}</span> |
+    Pop: <span>${last.count}</span> |
+    Gen: <span>${maxGen}</span> |
+    WM: <span>${(last.mean_wm_accuracy * 100).toFixed(1)}%</span>
+  `;
+
+  // KPIs
+  const maxWM = Math.max(...pop.map(d => d.mean_wm_accuracy));
+  const totalBirths = pop.reduce((s, d) => s + (d.births || 0), 0);
+  const totalDeaths = pop.reduce((s, d) => s + (d.deaths || 0), 0);
+  document.getElementById('kpis').innerHTML = `
+    <div class="kpi"><div class="label">Peak Population</div><div class="value">${maxPop}</div></div>
+    <div class="kpi"><div class="label">Max Generation</div><div class="value">${maxGen}</div></div>
+    <div class="kpi"><div class="label">Peak WM Accuracy</div><div class="value" style="color:${COLORS.success}">${(maxWM*100).toFixed(1)}%</div></div>
+    <div class="kpi"><div class="label">Total Births</div><div class="value" style="color:${COLORS.accent2}">${totalBirths}</div></div>
+    <div class="kpi"><div class="label">Total Deaths</div><div class="value" style="color:${COLORS.danger}">${totalDeaths}</div></div>
+    <div class="kpi"><div class="label">Structures Built</div><div class="value">${last.struct_built_ever || 0}</div></div>
+  `;
+
+  // === OVERVIEW ===
+  makeChart('chartPop', { type: 'line', data: { datasets: [
+    dataset('Population', pop, 'count', COLORS.accent, { fill: true }),
+  ]}});
+
+  makeChart('chartEnergy', { type: 'line', data: { datasets: [
+    dataset('Avg Energy', pop, 'mean_energy', COLORS.success),
+    dataset('Avg Health', pop, 'mean_health', COLORS.blue),
+  ]}});
+
+  makeChart('chartBirthDeath', { type: 'line', data: { datasets: [
+    dataset('Births', pop, 'births', COLORS.accent2),
+    dataset('Deaths', pop, 'deaths', COLORS.danger),
+  ]}});
+
+  makeChart('chartGen', { type: 'line', data: { datasets: [
+    dataset('Max Generation', pop, 'max_generation', COLORS.purple),
+    dataset('Best Gen Ever', pop, 'best_generation_ever', COLORS.warn),
+  ]}});
+
+  // === INTELLIGENCE ===
+  makeChart('chartWM', { type: 'line', data: { datasets: [
+    dataset('Avg WM Accuracy', pop, 'mean_wm_accuracy', COLORS.success, { fill: true }),
+  ]}});
+
+  makeChart('chartBN', { type: 'line', data: { datasets: [
+    dataset('Avg Bottleneck', pop, 'mean_bottleneck_size', COLORS.accent),
+  ]}});
+
+  makeChart('chartThink', { type: 'line', data: { datasets: [
+    dataset('Avg Think Steps', pop, 'mean_think_steps', COLORS.orange),
+  ]}});
+
+  makeChart('chartConcept', { type: 'line', data: { datasets: [
+    dataset('Agents w/ Rules', pop, 'agents_with_concept_rules', COLORS.accent2),
+    dataset('Avg Concept Acc', pop, 'mean_concept_rule_accuracy', COLORS.success),
+  ]}});
+
+  makeChart('chartSelfModel', { type: 'line', data: { datasets: [
+    dataset('Avg Self-Model Acc', pop, 'mean_self_model_accuracy', COLORS.pink),
+    dataset('Max Self-Model Acc', pop, 'max_self_model_accuracy', COLORS.purple),
+  ]}});
+
+  if (consciousness && consciousness.length > 0) {
+    makeChart('chartConsciousness', { type: 'line', data: { datasets: [
+      dataset('Self-Model', consciousness, 'self_model_accuracy', COLORS.accent),
+      dataset('Info Integration', consciousness, 'information_integration', COLORS.accent2),
+      dataset('Counterfactual', consciousness, 'counterfactual_sensitivity', COLORS.warn),
+    ]}});
+  }
+
+  // === ABSTRACT THINKING ===
+  makeChart('chartSymbolEntropy', { type: 'line', data: { datasets: [
+    dataset('Avg Symbol Entropy', pop, 'mean_symbol_entropy', COLORS.purple, { fill: true }),
+  ]}});
+
+  makeChart('chartSurvival', { type: 'line', data: { datasets: [
+    dataset('Avg Survival Prob', pop, 'mean_survival_prob', COLORS.success),
+  ]}});
+
+  makeChart('chartDeathAware', { type: 'line', data: { datasets: [
+    dataset('Avg Death Awareness', pop, 'mean_death_awareness', COLORS.danger, { fill: true }),
+  ]}});
+
+  makeChart('chartThoughtDepth', { type: 'line', data: { datasets: [
+    dataset('Avg Thought Depth', pop, 'mean_thought_depth', COLORS.orange),
+  ]}});
+
+  makeChart('chartVocab', { type: 'line', data: { datasets: [
+    dataset('Total Vocab Used', pop, 'total_vocab_used', COLORS.accent2),
+  ]}});
+
+  makeChart('chartDLang', { type: 'line', data: { datasets: [
+    dataset('Tokens Sent', pop, 'dlang_tokens_sent', COLORS.blue),
+    dataset('Tokens Heard', pop, 'dlang_tokens_heard', COLORS.pink),
+  ]}});
+
+  // === ECOLOGY ===
+  makeChart('chartEco', { type: 'line', data: { datasets: [
+    dataset('Plant Biomass', pop, 'eco_total_plant_biomass', COLORS.green),
+    dataset('Herbivores', pop, 'eco_total_herbivores', COLORS.blue),
+    dataset('Predators', pop, 'eco_total_predators', COLORS.danger),
+    dataset('Decomposers', pop, 'eco_total_decomposers', COLORS.orange),
+  ]}});
+
+  makeChart('chartChem', { type: 'line', data: { datasets: [
+    dataset('Substance Mass', pop, 'chem_total_substance_mass', COLORS.purple),
+    dataset('Active Reactions', pop, 'chem_n_active_reactions', COLORS.accent2),
+  ]}});
+
+  makeChart('chartTerrain', { type: 'line', data: { datasets: [
+    dataset('Avg Height', pop, 'terrain_mean_height', COLORS.warn),
+    dataset('Water Coverage', pop, 'terrain_water_coverage', COLORS.blue),
+    dataset('Tectonic Stress', pop, 'terrain_max_tectonic_stress', COLORS.danger),
+  ]}});
+
+  makeChart('chartHidden', { type: 'line', data: { datasets: [
+    dataset('Avg Radiation', pop, 'hidden_mean_radiation', COLORS.danger),
+    dataset('Avg Soil pH', pop, 'hidden_mean_soil_ph', COLORS.green),
+    dataset('Magnetic Strength', pop, 'hidden_magnetic_mean_strength', COLORS.purple),
+  ]}});
+
+  makeChart('chartStructures', { type: 'line', data: { datasets: [
+    dataset('Active Structures', pop, 'struct_total', COLORS.accent, { fill: true }),
+    dataset('Total Built', pop, 'struct_built_ever', COLORS.accent2),
+  ]}});
+
+  makeChart('chartResource', { type: 'line', data: { datasets: [
+    dataset('Total Resource', pop, 'total_resource', COLORS.success, { fill: true }),
+  ]}});
+
+  // === SOCIAL ===
+  makeChart('chartSocial', { type: 'line', data: { datasets: [
+    dataset('Trades', pop, 'trades', COLORS.success),
+    dataset('Combats', pop, 'combats', COLORS.danger),
+    dataset('Cooperations', pop, 'cooperations', COLORS.accent2),
+  ]}});
+
+  makeChart('chartCulture', { type: 'line', data: { datasets: [
+    dataset('Total Teachings', pop, 'total_teachings', COLORS.accent),
+    dataset('Total Imitations', pop, 'total_imitations', COLORS.pink),
+  ]}});
+
+  makeChart('chartLang', { type: 'line', data: { datasets: [
+    dataset('Signals Sent', pop, 'signals_sent', COLORS.blue),
+    dataset('Signals Heard', pop, 'signals_heard', COLORS.teal),
+    dataset('Unique Signalers', pop, 'unique_signalers', COLORS.warn),
+  ]}});
+
+  makeChart('chartDiversity', { type: 'line', data: { datasets: [
+    dataset('Genome Diversity', pop, 'diversity', COLORS.purple, { fill: true }),
+  ]}});
+
+  // === EVOLUTION / TRAITS ===
+  if (traits && traits.length > 0) {
+    makeChart('chartTraitSensor', { type: 'line', data: { datasets: [
+      dataset('Sensor Range (avg)', traits, 'sensor_range_mean', COLORS.accent),
+    ]}});
+    makeChart('chartTraitBody', { type: 'line', data: { datasets: [
+      dataset('Body Size (avg)', traits, 'body_size_mean', COLORS.orange),
+    ]}});
+    makeChart('chartTraitMut', { type: 'line', data: { datasets: [
+      dataset('Mutation Rate (avg)', traits, 'mutation_rate_mean', COLORS.danger),
+    ]}});
+    makeChart('chartTraitLR', { type: 'line', data: { datasets: [
+      dataset('Learning Rate (avg)', traits, 'learning_rate_mean', COLORS.success),
+    ]}});
+    makeChart('chartTraitRepro', { type: 'line', data: { datasets: [
+      dataset('Repro Threshold (avg)', traits, 'reproduction_threshold_mean', COLORS.warn),
+    ]}});
+    makeChart('chartTraitSens', { type: 'line', data: { datasets: [
+      dataset('Hunger', traits, 'hunger_sensitivity_mean', COLORS.orange),
+      dataset('Fear', traits, 'fear_sensitivity_mean', COLORS.danger),
+      dataset('Curiosity', traits, 'curiosity_sensitivity_mean', COLORS.accent2),
+    ]}});
+  }
+
+  // === RULES ===
+  if (rules && rules.length > 0) {
+    const latest = {};
+    rules.forEach(r => { latest[r.tick] = latest[r.tick] || []; latest[r.tick].push(r); });
+    const lastTick = Math.max(...Object.keys(latest).map(Number));
+    const container = document.getElementById('discoveredRules');
+    (latest[lastTick] || []).slice(0, 20).forEach(r => {
+      container.innerHTML += `<div class="rule-card">
+        <span class="acc">${(r.accuracy * 100).toFixed(0)}%</span> ${r.rule}
+        <div class="agent">Agent #${r.agent_id} | Gen ${r.generation} | ${r.tests} tests</div>
+      </div>`;
+    });
+  }
+
+  if (compRules && compRules.length > 0) {
+    const latest = {};
+    compRules.forEach(r => { latest[r.tick] = latest[r.tick] || []; latest[r.tick].push(r); });
+    const lastTick = Math.max(...Object.keys(latest).map(Number));
+    const container = document.getElementById('composableRules');
+    (latest[lastTick] || []).slice(0, 20).forEach(r => {
+      container.innerHTML += `<div class="rule-card">
+        <span class="acc">${(r.accuracy * 100).toFixed(0)}%</span> ${r.rule}
+        <div class="agent">Agent #${r.agent_id} | Gen ${r.generation} | complexity=${r.complexity}</div>
+      </div>`;
+    });
+  }
+
+  // === EVENTS ===
+  if (events && events.events) {
+    const list = document.getElementById('eventList');
+    events.events.slice().reverse().forEach(e => {
+      const sev = e.severity === 'milestone' ? 'milestone' : e.severity === 'danger' ? 'danger' : 'warning';
+      list.innerHTML += `<div class="event ${sev}">
+        <span class="tick">t=${e.tick}</span> <strong>${e.title}</strong>
+        <div class="desc">${e.description}</div>
+      </div>`;
+    });
+  }
+
+  // === HALL OF FAME ===
+  if (hof && hof.entries) {
+    const grid = document.getElementById('hofGrid');
+    const categories = {};
+    hof.entries.forEach(e => {
+      if (!categories[e.category]) categories[e.category] = [];
+      categories[e.category].push(e);
+    });
+    const catNames = {
+      'world_modeler': 'World Modelers',
+      'most_prolific': 'Prolific Ancestors',
+      'longest_lived': 'Longest Lived',
+      'concept_master': 'Concept Masters',
+      'deep_thinker': 'Deep Thinkers',
+      'language_pioneer': 'Language Pioneers',
+      'dynasty': 'Dynasties',
+    };
+    for (const [cat, entries] of Object.entries(categories)) {
+      let html = `<div class="card"><h2>${catNames[cat] || cat}</h2>`;
+      entries.slice(-10).reverse().forEach(e => {
+        html += `<div class="hof-entry">
+          <div class="name">${e.name}</div>
+          <div class="title">${e.title}</div>
+          <div class="detail">${e.description}</div>
+          <div class="detail">Gen ${e.generation} | Lineage ${e.lineage_id} | t=${e.tick_inducted}</div>
+        </div>`;
+      });
+      html += '</div>';
+      grid.innerHTML += html;
+    }
+  }
+}
+
+// Tab switching
+document.getElementById('tabs').addEventListener('click', e => {
+  if (!e.target.classList.contains('tab')) return;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  e.target.classList.add('active');
+  document.getElementById('panel-' + e.target.dataset.panel).classList.add('active');
+});
+
+loadAll();
+</script>
+</body>
+</html>
