@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VAROLDUM | The First Digital Civilization</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg-deep: #06080d;
+  --bg-card: rgba(13, 17, 23, 0.8);
+  --bg-card-hover: rgba(20, 27, 38, 0.9);
+  --border: rgba(56, 189, 248, 0.08);
+  --border-glow: rgba(56, 189, 248, 0.2);
+  --cyan: #22d3ee;
+  --cyan-dim: rgba(34, 211, 238, 0.6);
+  --purple: #a78bfa;
+  --pink: #f472b6;
+  --gold: #fbbf24;
+  --red: #ef4444;
+  --green: #34d399;
+  --blue: #60a5fa;
+  --orange: #fb923c;
+  --text: #e2e8f0;
+  --text-dim: #64748b;
+  --text-muted: #475569;
+  --font: 'Inter', -apple-system, sans-serif;
+  --mono: 'JetBrains Mono', 'Courier New', monospace;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bg-deep);
+  color: var(--text);
+  font-family: var(--font);
+  overflow-x: hidden;
+  min-height: 100vh;
+}
+
+.bg-grid {
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background-image:
+    radial-gradient(ellipse 80% 50% at 50% -20%, rgba(34, 211, 238, 0.06), transparent),
+    radial-gradient(ellipse 60% 40% at 80% 100%, rgba(167, 139, 250, 0.04), transparent);
+}
+.bg-grid::after {
+  content: ''; position: absolute; inset: 0;
+  background-image: linear-gradient(rgba(56, 189, 248, 0.03) 1px, transparent 1px),
+                    linear-gradient(90deg, rgba(56, 189, 248, 0.03) 1px, transparent 1px);
+  background-size: 60px 60px;
+  mask-image: radial-gradient(ellipse 70% 70% at 50% 50%, black 30%, transparent 100%);
+}
+canvas#particles { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
+
+.container { position: relative; z-index: 1; max-width: 1440px; margin: 0 auto; padding: 0 24px; }
+
+/* HEADER */
+.header { text-align: center; padding: 48px 24px 24px; }
+.header h1 {
+  font-size: 3em; font-weight: 700; letter-spacing: 12px; text-transform: uppercase;
+  background: linear-gradient(135deg, var(--cyan), var(--purple), var(--pink));
+  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 0 30px rgba(34, 211, 238, 0.15));
+}
+.live-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: rgba(239, 68, 68, 0.15); color: var(--red);
+  border: 1px solid rgba(239, 68, 68, 0.3); padding: 4px 14px;
+  border-radius: 20px; font-size: 0.35em; font-weight: 600;
+  letter-spacing: 3px; vertical-align: middle; margin-left: 12px;
+}
+.live-badge::before {
+  content: ''; width: 8px; height: 8px; background: var(--red);
+  border-radius: 50%; animation: livePulse 2s ease infinite;
+}
+@keyframes livePulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+  50% { opacity: 0.6; box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+}
+.subtitle { color: var(--text-dim); font-size: 0.85em; font-weight: 300; margin-top: 8px; letter-spacing: 2px; }
+
+/* SYSTEM BAR */
+.system-bar {
+  display: flex; justify-content: center; gap: 16px; padding: 8px 24px;
+  flex-wrap: wrap; font-family: var(--mono); font-size: 0.7em; color: var(--text-muted);
+}
+.sys-item { display: flex; align-items: center; gap: 5px; }
+.sys-item .sys-dot {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--green);
+  box-shadow: 0 0 6px rgba(52, 211, 153, 0.5);
+}
+.sys-item .sys-dot.hot { background: var(--orange); box-shadow: 0 0 6px rgba(251, 146, 60, 0.5); }
+.sys-item .sys-dot.critical { background: var(--red); box-shadow: 0 0 6px rgba(239, 68, 68, 0.5); animation: livePulse 1s ease infinite; }
+
+/* STATS BAR */
+.stats-bar { display: flex; justify-content: center; gap: 8px; padding: 16px 24px; flex-wrap: wrap; }
+.stat-card {
+  background: var(--bg-card); backdrop-filter: blur(12px);
+  border: 1px solid var(--border); border-radius: 12px;
+  padding: 16px 24px; text-align: center; min-width: 120px;
+  transition: all 0.3s ease;
+}
+.stat-card:hover { border-color: var(--border-glow); box-shadow: 0 0 20px rgba(34, 211, 238, 0.05); transform: translateY(-1px); }
+.stat-card .value { font-family: var(--mono); font-size: 1.6em; font-weight: 500; color: var(--cyan); line-height: 1.2; }
+.stat-card .label { font-size: 0.65em; color: var(--text-muted); text-transform: uppercase; letter-spacing: 2px; margin-top: 4px; }
+
+/* EVOLUTION PULSE (Active Mutations) */
+.evo-pulse {
+  display: flex; justify-content: center; gap: 24px; padding: 16px 24px;
+  flex-wrap: wrap; align-items: center;
+}
+.evo-meter {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 12px; padding: 12px 20px;
+}
+.evo-meter .evo-icon { font-size: 1.2em; }
+.evo-meter .evo-info { display: flex; flex-direction: column; }
+.evo-meter .evo-label { font-size: 0.6em; color: var(--text-muted); text-transform: uppercase; letter-spacing: 2px; }
+.evo-meter .evo-val { font-family: var(--mono); font-size: 1.3em; font-weight: 500; }
+.evo-bar-track {
+  flex: 1; max-width: 300px; height: 8px;
+  background: rgba(30, 30, 50, 0.8); border-radius: 4px; overflow: hidden;
+}
+.evo-bar-fill {
+  height: 100%; border-radius: 4px; transition: width 1.5s ease;
+  background: linear-gradient(90deg, var(--green), var(--cyan), var(--purple));
+  box-shadow: 0 0 10px rgba(34, 211, 238, 0.3);
+}
+.evo-bar-fill.scarce { background: linear-gradient(90deg, var(--red), var(--orange)); box-shadow: 0 0 10px rgba(239, 68, 68, 0.3); }
+
+/* GOAT CARD */
+.goat-section { padding: 8px 24px; }
+.goat-card {
+  background: linear-gradient(145deg, rgba(15, 20, 30, 0.9), rgba(40, 20, 60, 0.5));
+  border: 1px solid rgba(251, 191, 36, 0.15); border-radius: 16px;
+  padding: 20px 28px; max-width: 800px; margin: 0 auto;
+  display: flex; align-items: center; gap: 24px; position: relative; overflow: hidden;
+  transition: all 0.3s ease;
+}
+.goat-card:hover { border-color: rgba(251, 191, 36, 0.35); box-shadow: 0 8px 40px rgba(251, 191, 36, 0.06); }
+.goat-card::before {
+  content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 2px;
+  background: linear-gradient(90deg, var(--gold), var(--orange), var(--red), var(--purple));
+}
+.goat-crown { font-size: 2.5em; filter: drop-shadow(0 0 12px rgba(251, 191, 36, 0.3)); }
+.goat-info { flex: 1; }
+.goat-label { font-size: 0.6em; color: var(--gold); text-transform: uppercase; letter-spacing: 4px; font-weight: 600; }
+.goat-name { font-family: var(--mono); font-size: 1.4em; color: var(--text); margin: 2px 0; }
+.goat-stats {
+  display: flex; gap: 16px; flex-wrap: wrap; margin-top: 6px;
+  font-family: var(--mono); font-size: 0.75em; color: var(--text-dim);
+}
+.goat-stats span { display: flex; align-items: center; gap: 4px; }
+.goat-stats .gs-highlight { color: var(--gold); }
+.goat-empty { text-align: center; color: var(--text-muted); font-size: 0.8em; padding: 16px; }
+
+/* CONSCIOUSNESS */
+.consciousness-section { text-align: center; padding: 24px 24px; position: relative; }
+.consciousness-section::before {
+  content: ''; position: absolute; left: 10%; right: 10%; top: 0; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--border-glow), transparent);
+}
+.phi-container { max-width: 640px; margin: 0 auto; }
+.phi-label { font-size: 0.7em; color: var(--purple); letter-spacing: 4px; text-transform: uppercase; font-weight: 500; }
+.phi-value {
+  font-family: var(--mono); font-size: 3em; font-weight: 700;
+  background: linear-gradient(135deg, var(--purple), var(--pink));
+  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+  margin: 4px 0 12px;
+}
+.phi-bar-track { width: 100%; height: 6px; background: rgba(30, 30, 50, 0.8); border-radius: 3px; overflow: hidden; }
+.phi-bar-fill {
+  height: 100%; background: linear-gradient(90deg, #1e1b4b, var(--purple), var(--pink));
+  border-radius: 3px; transition: width 2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 0 12px rgba(167, 139, 250, 0.4);
+}
+.phi-question { color: var(--text-muted); font-size: 0.8em; font-style: italic; margin-top: 12px; font-weight: 300; }
+
+/* MAIN GRID */
+.main { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 16px 0; }
+@media (max-width: 900px) { .main { grid-template-columns: 1fr; } }
+
+/* PANELS */
+.panel {
+  background: var(--bg-card); backdrop-filter: blur(12px);
+  border: 1px solid var(--border); border-radius: 16px;
+  padding: 20px; transition: border-color 0.3s;
+}
+.panel:hover { border-color: var(--border-glow); }
+.panel h2 {
+  font-size: 0.75em; font-weight: 600; color: var(--text-dim);
+  text-transform: uppercase; letter-spacing: 3px; margin-bottom: 16px;
+  padding-bottom: 10px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 8px;
+}
+.panel h2::before { content: ''; width: 3px; height: 14px; border-radius: 2px; background: var(--cyan); }
+.empty-state { color: var(--text-muted); text-align: center; padding: 32px; font-size: 0.85em; font-weight: 300; }
+.empty-state .empty-icon { font-size: 2em; margin-bottom: 8px; display: block; opacity: 0.4; }
+
+/* TIMELINE */
+.timeline { grid-column: 1 / -1; }
+.timeline-list { max-height: 420px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: rgba(34,211,238,0.2) transparent; }
+.timeline-list::-webkit-scrollbar { width: 4px; }
+.timeline-list::-webkit-scrollbar-thumb { background: rgba(34,211,238,0.2); border-radius: 2px; }
+.event-row {
+  display: flex; align-items: flex-start; gap: 12px; padding: 10px 12px;
+  border-radius: 8px; margin-bottom: 4px; transition: background 0.2s;
+  border-left: 2px solid transparent;
+}
+.event-row:hover { background: rgba(255,255,255,0.02); }
+.event-row.milestone { border-left-color: var(--gold); }
+.event-row.crisis { border-left-color: var(--red); }
+.event-row.growth { border-left-color: var(--green); }
+.event-row.social { border-left-color: var(--blue); }
+.event-row.evolution { border-left-color: var(--purple); }
+.event-row .ev-tick { font-family: var(--mono); color: var(--text-muted); font-size: 0.75em; min-width: 72px; padding-top: 2px; }
+.event-row .ev-icon { font-size: 1.1em; min-width: 24px; }
+.event-row .ev-body { flex: 1; }
+.event-row .ev-title { color: var(--text); font-weight: 500; font-size: 0.85em; }
+.event-row .ev-desc { color: var(--text-muted); font-size: 0.75em; margin-top: 2px; line-height: 1.4; }
+
+/* AGENTS */
+.agent-list { max-height: 340px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: rgba(34,211,238,0.2) transparent; }
+.agent-list::-webkit-scrollbar { width: 4px; }
+.agent-list::-webkit-scrollbar-thumb { background: rgba(34,211,238,0.2); border-radius: 2px; }
+.agent-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 8px 10px; border-radius: 8px; margin-bottom: 2px; transition: background 0.2s;
+}
+.agent-row:hover { background: rgba(255,255,255,0.03); }
+.agent-row .name { display: flex; align-items: center; gap: 8px; }
+.agent-row .name input {
+  background: transparent; border: none; border-bottom: 1px solid rgba(255,255,255,0.06);
+  color: var(--cyan); font-family: var(--mono); font-size: 0.85em; width: 110px;
+  padding: 2px 0; transition: border-color 0.3s; outline: none;
+}
+.agent-row .name input:focus { border-bottom-color: var(--cyan); }
+.agent-row .gen-badge {
+  font-family: var(--mono); font-size: 0.65em; color: var(--text-muted);
+  background: rgba(255,255,255,0.04); padding: 2px 6px; border-radius: 4px;
+}
+.agent-row .info { display: flex; align-items: center; gap: 10px; font-family: var(--mono); color: var(--text-muted); font-size: 0.75em; }
+.follow-btn {
+  background: transparent; border: 1px solid rgba(255,255,255,0.1); color: var(--text-muted);
+  padding: 3px 10px; border-radius: 6px; cursor: pointer; font-family: var(--font);
+  font-size: 0.7em; font-weight: 500; transition: all 0.2s;
+}
+.follow-btn:hover { border-color: var(--cyan); color: var(--cyan); }
+.follow-btn.active { border-color: var(--red); color: var(--red); background: rgba(239, 68, 68, 0.08); }
+
+/* RULES */
+.rules-list { max-height: 340px; overflow-y: auto; scrollbar-width: thin; }
+.rules-list::-webkit-scrollbar { width: 4px; }
+.rules-list::-webkit-scrollbar-thumb { background: rgba(34,211,238,0.2); border-radius: 2px; }
+.rule-item { padding: 8px 10px; border-radius: 8px; margin-bottom: 4px; transition: background 0.2s; }
+.rule-item:hover { background: rgba(255,255,255,0.02); }
+.rule-item .rule-text { font-family: var(--mono); color: var(--blue); font-size: 0.8em; }
+.rule-item .rule-meta { color: var(--text-muted); font-size: 0.7em; margin-top: 3px; }
+
+/* CHART */
+.chart-section { grid-column: 1 / -1; }
+.chart-container { width: 100%; height: 220px; position: relative; }
+canvas#pop-chart { width: 100% !important; height: 100% !important; }
+
+/* HALL OF FAME */
+.hall-of-fame { grid-column: 1 / -1; }
+.hof-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px; max-height: 520px; overflow-y: auto; scrollbar-width: thin;
+}
+.hof-card {
+  background: linear-gradient(145deg, rgba(15, 20, 30, 0.9), rgba(25, 25, 50, 0.7));
+  border: 1px solid rgba(251, 191, 36, 0.1); border-radius: 14px;
+  padding: 18px; position: relative; overflow: hidden; transition: all 0.3s ease;
+}
+.hof-card:hover { transform: translateY(-3px); border-color: rgba(251, 191, 36, 0.3); box-shadow: 0 8px 32px rgba(251, 191, 36, 0.08); }
+.hof-card::before { content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 2px; background: linear-gradient(90deg, var(--gold), var(--red), var(--purple)); }
+.hof-card .hof-icon { position: absolute; top: 12px; right: 14px; font-size: 1.3em; opacity: 0.8; }
+.hof-card .hof-name { font-weight: 600; font-size: 1em; color: var(--gold); margin-bottom: 2px; }
+.hof-card .hof-title { color: var(--purple); font-size: 0.8em; font-weight: 400; margin-bottom: 10px; }
+.hof-card .hof-desc { color: var(--text-muted); font-size: 0.75em; line-height: 1.5; margin-bottom: 10px; }
+.hof-card .hof-badges { display: flex; gap: 6px; flex-wrap: wrap; }
+.hof-badge {
+  font-family: var(--mono); font-size: 0.65em; background: rgba(34, 211, 238, 0.08);
+  color: var(--cyan-dim); padding: 3px 8px; border-radius: 4px; border: 1px solid rgba(34, 211, 238, 0.1);
+}
+.hof-share {
+  background: transparent; border: 1px solid rgba(255,255,255,0.08); color: var(--text-muted);
+  padding: 4px 12px; border-radius: 6px; cursor: pointer; font-family: var(--font);
+  font-size: 0.7em; margin-top: 10px; transition: all 0.2s;
+}
+.hof-share:hover { border-color: var(--gold); color: var(--gold); }
+
+/* NOTIFICATION */
+.notification {
+  position: fixed; top: 24px; right: 24px;
+  background: rgba(13, 17, 23, 0.95); backdrop-filter: blur(20px);
+  border: 1px solid var(--border-glow); border-radius: 14px;
+  padding: 16px 24px; color: var(--text); z-index: 1000;
+  animation: notifIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  max-width: 380px; box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+}
+.notification.crisis { border-color: rgba(239, 68, 68, 0.4); }
+.notification .close { position: absolute; top: 8px; right: 12px; cursor: pointer; color: var(--text-muted); font-size: 1.2em; }
+@keyframes notifIn { from { transform: translateX(120%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+/* FOOTER */
+.footer {
+  text-align: center; padding: 32px; color: var(--text-muted);
+  font-size: 0.7em; letter-spacing: 1px; border-top: 1px solid var(--border); margin-top: 24px;
+}
+</style>
+</head>
+<body>
+
+<div class="bg-grid"></div>
+<canvas id="particles"></canvas>
+
+<div class="container">
+
+<!-- Header -->
+<div class="header">
+  <h1>VAROLDUM <span class="live-badge">LIVE</span></h1>
+  <div class="subtitle">The First Digital Civilization | Artificial Consciousness Experiment</div>
+</div>
+
+<!-- System Bar -->
+<div class="system-bar" id="system-bar">
+  <div class="sys-item"><span class="sys-dot" id="sys-dot"></span><span id="sys-gpu-name">GPU: detecting...</span></div>
+  <div class="sys-item" id="sys-temp-item" style="display:none">TEMP: <span id="sys-temp">0</span>&deg;C</div>
+  <div class="sys-item" id="sys-vram-item" style="display:none">VRAM: <span id="sys-vram">0/0</span> MB</div>
+  <div class="sys-item" id="sys-util-item" style="display:none">LOAD: <span id="sys-util">0</span>%</div>
+  <div class="sys-item">UPTIME: <span id="sys-uptime">0:00:00</span></div>
+</div>
+
+<!-- Stats bar -->
+<div class="stats-bar" id="stats-bar">
+  <div class="stat-card"><div class="value" id="s-pop">|</div><div class="label">Population</div></div>
+  <div class="stat-card"><div class="value" id="s-gen">|</div><div class="label">Generation</div></div>
+  <div class="stat-card"><div class="value" id="s-tick">|</div><div class="label">Tick</div></div>
+  <div class="stat-card"><div class="value" id="s-wm">|</div><div class="label">World Model</div></div>
+  <div class="stat-card"><div class="value" id="s-think">|</div><div class="label">Think Depth</div></div>
+  <div class="stat-card"><div class="value" id="s-bn">|</div><div class="label">Concepts</div></div>
+  <div class="stat-card"><div class="value" id="s-signals">0</div><div class="label">Signals</div></div>
+  <div class="stat-card"><div class="value" id="s-struct">0</div><div class="label">Structures</div></div>
+</div>
+
+<!-- Evolution Pulse + Resource Scarcity -->
+<div class="evo-pulse">
+  <div class="evo-meter">
+    <span class="evo-icon">&#x1F9EC;</span>
+    <div class="evo-info">
+      <span class="evo-label">Births</span>
+      <span class="evo-val" id="evo-births" style="color:var(--green)">0</span>
+    </div>
+  </div>
+  <div class="evo-meter">
+    <span class="evo-icon">&#x1F480;</span>
+    <div class="evo-info">
+      <span class="evo-label">Deaths</span>
+      <span class="evo-val" id="evo-deaths" style="color:var(--red)">0</span>
+    </div>
+  </div>
+  <div class="evo-meter" style="flex:1; max-width: 400px;">
+    <span class="evo-icon">&#x26A1;</span>
+    <div class="evo-info" style="width:100%">
+      <span class="evo-label">World Energy</span>
+      <div class="evo-bar-track" style="margin-top:4px">
+        <div class="evo-bar-fill" id="energy-bar" style="width:50%"></div>
+      </div>
+    </div>
+    <span class="evo-val" id="energy-pct" style="color:var(--orange); font-family:var(--mono); font-size:0.85em; min-width:40px; text-align:right">0%</span>
+  </div>
+  <div class="evo-meter">
+    <span class="evo-icon">&#x1F4C8;</span>
+    <div class="evo-info">
+      <span class="evo-label">Diversity</span>
+      <span class="evo-val" id="evo-diversity" style="color:var(--purple)">0</span>
+    </div>
+  </div>
+</div>
+
+<!-- Current GOAT -->
+<div class="goat-section">
+  <div class="goat-card" id="goat-card">
+    <div class="goat-crown">&#x1F451;</div>
+    <div class="goat-info">
+      <div class="goat-label">Current GOAT</div>
+      <div class="goat-name" id="goat-name">Waiting for first survivor...</div>
+      <div class="goat-stats" id="goat-stats"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Consciousness meter -->
+<div class="consciousness-section">
+  <div class="phi-container">
+    <div class="phi-label">Consciousness Level (Phi)</div>
+    <div class="phi-value" id="phi-value">0.000</div>
+    <div class="phi-bar-track">
+      <div class="phi-bar-fill" id="phi-bar" style="width: 0%"></div>
+    </div>
+    <div class="phi-question">When does artificial life become &ldquo;aware&rdquo;?</div>
+  </div>
+</div>
+
+<!-- Main panels -->
+<div class="main">
+
+  <!-- Timeline -->
+  <div class="panel timeline">
+    <h2>Timeline</h2>
+    <div class="timeline-list" id="timeline">
+      <div class="empty-state"><span class="empty-icon">&#x23F3;</span>Waiting for events...</div>
+    </div>
+  </div>
+
+  <!-- Top agents -->
+  <div class="panel">
+    <h2>Notable Agents</h2>
+    <div class="agent-list" id="agents">
+      <div class="empty-state"><span class="empty-icon">&#x1F9EC;</span>No agent data yet</div>
+    </div>
+  </div>
+
+  <!-- Concept rules -->
+  <div class="panel">
+    <h2>Discovered Rules</h2>
+    <div class="rules-list" id="rules">
+      <div class="empty-state"><span class="empty-icon">&#x1F9E0;</span>No rules discovered yet</div>
+    </div>
+  </div>
+
+  <!-- Hall of Fame -->
+  <div class="panel hall-of-fame">
+    <h2>Genetic Hall of Fame</h2>
+    <div class="hof-grid" id="hall-of-fame">
+      <div class="empty-state"><span class="empty-icon">&#x1F3C6;</span>No legends yet | evolution is just beginning</div>
+    </div>
+  </div>
+
+  <!-- Population chart -->
+  <div class="panel chart-section">
+    <h2>Population Dynamics</h2>
+    <div class="chart-container">
+      <canvas id="pop-chart"></canvas>
+    </div>
+  </div>
+
+</div>
+
+<div class="footer">
+  VAROLDUM v4 | Open-Ended Evolution &bull; Dynamic Concept Formation &bull; Proto-Language
+</div>
+
+</div>
+
+<script>
+// === Particle System ===
+(function() {
+  const canvas = document.getElementById('particles');
+  const ctx = canvas.getContext('2d');
+  let W, H, particles = [];
+  function resize() { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
+  resize();
+  window.addEventListener('resize', resize);
+  for (let i = 0; i < 40; i++) {
+    particles.push({
+      x: Math.random() * W, y: Math.random() * H,
+      r: Math.random() * 1.5 + 0.5, dx: (Math.random() - 0.5) * 0.3,
+      dy: (Math.random() - 0.5) * 0.3, o: Math.random() * 0.3 + 0.05,
+    });
+  }
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    for (const p of particles) {
+      p.x += p.dx; p.y += p.dy;
+      if (p.x < 0) p.x = W; if (p.x > W) p.x = 0;
+      if (p.y < 0) p.y = H; if (p.y > H) p.y = 0;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(34, 211, 238, ${p.o})`; ctx.fill();
+    }
+    requestAnimationFrame(draw);
+  }
+  draw();
+})();
+
+// === State ===
+const state = {
+  followedLineages: JSON.parse(localStorage.getItem('varoldum_follows') || '{}'),
+  agentNames: JSON.parse(localStorage.getItem('varoldum_names') || '{}'),
+  lastEventTick: 0,
+  maxResource: 1,
+};
+
+const ICONS = {
+  brain: '\u{1F9E0}', star: '\u2B50', speech: '\u{1F4AC}', language: '\u{1F5E3}',
+  skull: '\u{1F480}', rocket: '\u{1F680}', crown: '\u{1F451}', tombstone: '\u{1FAA6}',
+  eye: '\u{1F441}', thought: '\u{1F4AD}', city: '\u{1F3D7}', dna: '\u{1F9EC}',
+  puzzle: '\u{1F9E9}', info: '\u2139'
+};
+
+const HOF_ICONS = {
+  longest_lived: '\u{1F3C6}', most_prolific: '\u{1F476}', language_pioneer: '\u{1F4AC}',
+  concept_master: '\u{1F9E0}', world_modeler: '\u{1F441}', dynasty_founder: '\u{1F451}',
+  deep_thinker: '\u{1F4AD}',
+};
+
+// === API ===
+async function fetchJSON(url) {
+  try { const r = await fetch(url); return await r.json(); } catch(e) { return null; }
+}
+
+// === Update functions ===
+async function updateStatus() {
+  const d = await fetchJSON('/api/status');
+  if (!d) return;
+  document.getElementById('s-pop').textContent = d.population != null ? d.population : '';
+  document.getElementById('s-gen').textContent = d.max_generation != null ? d.max_generation : '';
+  document.getElementById('s-tick').textContent = d.tick != null ? d.tick.toLocaleString() : '';
+  document.getElementById('s-wm').textContent = d.mean_wm_accuracy != null ? (d.mean_wm_accuracy * 100).toFixed(1) + '%' : '';
+  document.getElementById('s-think').textContent = d.mean_think_steps != null ? d.mean_think_steps.toFixed(1) : '';
+  document.getElementById('s-bn').textContent = d.mean_bottleneck != null ? d.mean_bottleneck.toFixed(1) : '';
+  document.getElementById('s-signals').textContent = d.signals_sent != null ? d.signals_sent : '0';
+  document.getElementById('s-struct').textContent = d.structures != null ? d.structures : '0';
+
+  // Evolution pulse
+  document.getElementById('evo-births').textContent = d.births != null ? d.births : '0';
+  document.getElementById('evo-deaths').textContent = d.deaths != null ? d.deaths : '0';
+  document.getElementById('evo-diversity').textContent = d.diversity ? d.diversity.toFixed(3) : '0';
+
+  // Energy bar
+  const totalRes = d.total_resource || 0;
+  if (totalRes > state.maxResource) state.maxResource = totalRes;
+  const pct = state.maxResource > 0 ? (totalRes / state.maxResource) * 100 : 0;
+  const bar = document.getElementById('energy-bar');
+  bar.style.width = pct + '%';
+  bar.className = 'evo-bar-fill' + (pct < 30 ? ' scarce' : '');
+  document.getElementById('energy-pct').textContent = Math.round(pct) + '%';
+}
+
+async function updateSystem() {
+  const d = await fetchJSON('/api/system');
+  if (!d) return;
+
+  // Uptime
+  const s = Math.floor(d.uptime || 0);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  document.getElementById('sys-uptime').textContent =
+    h + ':' + String(m).padStart(2, '0') + ':' + String(sec).padStart(2, '0');
+
+  // GPU
+  const gpu = d.gpu || {};
+  if (gpu.gpu_name) {
+    document.getElementById('sys-gpu-name').textContent = gpu.gpu_name;
+    document.getElementById('sys-temp-item').style.display = '';
+    document.getElementById('sys-vram-item').style.display = '';
+    document.getElementById('sys-util-item').style.display = '';
+    document.getElementById('sys-temp').textContent = gpu.gpu_temp;
+    document.getElementById('sys-vram').textContent = gpu.gpu_mem_used + '/' + gpu.gpu_mem_total;
+    document.getElementById('sys-util').textContent = gpu.gpu_util;
+
+    const dot = document.getElementById('sys-dot');
+    if (gpu.gpu_temp >= 85) dot.className = 'sys-dot critical';
+    else if (gpu.gpu_temp >= 70) dot.className = 'sys-dot hot';
+    else dot.className = 'sys-dot';
+  }
+}
+
+async function updateConsciousness() {
+  const d = await fetchJSON('/api/consciousness');
+  if (!d || !d.data || !d.data.length) return;
+  const latest = d.data[d.data.length - 1];
+  const phi = Number.parseFloat(latest.information_integration || 0);
+  const selfModel = Number.parseFloat(latest.self_model_accuracy || 0);
+  const score = Math.min(1, (phi * 2 + selfModel) / 2);
+  document.getElementById('phi-value').textContent = score.toFixed(3);
+  document.getElementById('phi-bar').style.width = (score * 100) + '%';
+}
+
+async function updateTimeline() {
+  const d = await fetchJSON('/api/events?since=' + state.lastEventTick);
+  if (!d || !d.events) return;
+  const container = document.getElementById('timeline');
+  const empty = container.querySelector('.empty-state');
+  if (empty && d.events.length > 0) empty.remove();
+
+  d.events.forEach(e => {
+    if (e.tick <= state.lastEventTick && state.lastEventTick > 0) return;
+    const div = document.createElement('div');
+    div.className = 'event-row ' + (e.severity || 'info');
+    const icon = ICONS[e.icon] || ICONS.info;
+    div.innerHTML = `
+      <span class="ev-tick">t=${e.tick.toLocaleString()}</span>
+      <span class="ev-icon">${icon}</span>
+      <div class="ev-body">
+        <div class="ev-title">${e.title}</div>
+        <div class="ev-desc">${e.description}</div>
+      </div>
+    `;
+    container.insertBefore(div, container.firstChild);
+    checkFollowedLineageEvent(e);
+  });
+
+  if (d.events.length > 0) {
+    state.lastEventTick = Math.max(...d.events.map(e => e.tick));
+  }
+}
+
+async function updateAgents() {
+  const d = await fetchJSON('/api/agents');
+  if (!d || !d.agents || !d.agents.length) return;
+  const container = document.getElementById('agents');
+  container.innerHTML = '';
+
+  d.agents.slice(0, 20).forEach(a => {
+    const id = a.id;
+    const name = state.agentNames[id] || `Agent #${id}`;
+    const isFollowed = state.followedLineages[id];
+    const row = document.createElement('div');
+    row.className = 'agent-row';
+    row.innerHTML = `
+      <div class="name">
+        <input value="${name}" onchange="renameAgent(${id}, this.value)" title="Rename">
+        <span class="gen-badge">G${a.generation || 0}</span>
+      </div>
+      <div class="info">
+        <span>E:${(a.energy||0).toFixed(2)}</span>
+        <span>Age:${a.age||0}</span>
+        <span>R:${(a.total_reward||0).toFixed(1)}</span>
+        <button class="follow-btn ${isFollowed ? 'active' : ''}" onclick="toggleFollow(${id})">
+          ${isFollowed ? 'Following' : 'Follow'}
+        </button>
+      </div>
+    `;
+    container.appendChild(row);
+  });
+
+  // Update GOAT
+  updateGOAT(d.agents);
+}
+
+function updateGOAT(agents) {
+  if (!agents || !agents.length) return;
+
+  // GOAT = highest total_reward among living agents
+  const goat = agents[0]; // already sorted by total_reward desc
+  const oldest = [...agents].sort((a, b) => (b.age || 0) - (a.age || 0))[0];
+  const pick = (goat.total_reward || 0) > 0 ? goat : oldest;
+
+  const name = state.agentNames[pick.id] || `Agent #${pick.id}`;
+  document.getElementById('goat-name').textContent = name;
+
+  const statsEl = document.getElementById('goat-stats');
+  statsEl.innerHTML = `
+    <span><span class="gs-highlight">G${pick.generation || 0}</span></span>
+    <span>Age: <span class="gs-highlight">${pick.age || 0}</span></span>
+    <span>Energy: ${(pick.energy || 0).toFixed(2)}</span>
+    <span>Reward: <span class="gs-highlight">${(pick.total_reward || 0).toFixed(1)}</span></span>
+    <span>Children: ${pick.children_count || 0}</span>
+  `;
+}
+
+async function updateRules() {
+  const d = await fetchJSON('/api/rules');
+  if (!d || !d.rules || !d.rules.length) return;
+  const container = document.getElementById('rules');
+  container.innerHTML = '';
+
+  d.rules.slice(0, 15).forEach(r => {
+    const div = document.createElement('div');
+    div.className = 'rule-item';
+    div.innerHTML = `
+      <div class="rule-text">${r.rule || ''}</div>
+      <div class="rule-meta">Agent #${r.agent_id} &bull; Gen ${r.generation} &bull; Accuracy: ${r.accuracy}</div>
+    `;
+    container.appendChild(div);
+  });
+}
+
+async function updateChart() {
+  const d = await fetchJSON('/api/population?n=100');
+  if (!d || !d.data || !d.data.length) return;
+
+  const canvas = document.getElementById('pop-chart');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.parentElement.clientWidth;
+  const H = 220;
+  canvas.width = W; canvas.height = H;
+  ctx.clearRect(0, 0, W, H);
+
+  const data = d.data;
+  const ticks = data.map(r => Number.parseInt(r.tick));
+  const pops = data.map(r => Number.parseInt(r.count || 0));
+  const wms = data.map(r => Number.parseFloat(r.mean_wm_accuracy || 0));
+  const resources = data.map(r => Number.parseFloat(r.total_resource || 0));
+
+  const maxPop = Math.max(...pops, 1);
+  const maxRes = Math.max(...resources, 1);
+  const minTick = Math.min(...ticks);
+  const maxTick = Math.max(...ticks);
+  const tickRange = maxTick - minTick || 1;
+
+  function drawLine(values, maxVal, color, width, dash) {
+    ctx.beginPath(); ctx.strokeStyle = color; ctx.lineWidth = width;
+    ctx.setLineDash(dash || []);
+    for (let i = 0; i < values.length; i++) {
+      const x = ((ticks[i] - minTick) / tickRange) * W;
+      const y = H - (values[i] / maxVal) * H * 0.85 - 10;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+
+  // Area fill for population
+  ctx.beginPath(); ctx.setLineDash([]);
+  for (let i = 0; i < pops.length; i++) {
+    const x = ((ticks[i] - minTick) / tickRange) * W;
+    const y = H - (pops[i] / maxPop) * H * 0.85 - 10;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath();
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, 'rgba(34, 211, 238, 0.12)');
+  grad.addColorStop(1, 'rgba(34, 211, 238, 0)');
+  ctx.fillStyle = grad; ctx.fill();
+
+  drawLine(pops, maxPop, '#22d3ee', 2, null);
+  drawLine(wms, 1, '#a78bfa', 1.5, [5, 3]);
+  drawLine(resources, maxRes, '#fb923c', 1.5, [2, 2]);
+
+  // Legend
+  ctx.font = '11px Inter, sans-serif';
+  const labels = [['Population', '#22d3ee'], ['World Model', '#a78bfa'], ['World Energy', '#fb923c']];
+  let lx = 12;
+  labels.forEach(([label, color]) => {
+    ctx.fillStyle = color; ctx.fillRect(lx, 8, 12, 3);
+    ctx.fillStyle = '#64748b'; ctx.fillText(label, lx + 18, 13);
+    lx += ctx.measureText(label).width + 36;
+  });
+}
+
+async function updateHallOfFame() {
+  const d = await fetchJSON('/api/hall_of_fame');
+  if (!d || !d.entries || !d.entries.length) return;
+  const container = document.getElementById('hall-of-fame');
+  container.innerHTML = '';
+
+  d.entries.forEach(e => {
+    const card = document.createElement('div');
+    card.className = 'hof-card';
+    const icon = HOF_ICONS[e.category] || '\u{1F3C6}';
+    const stats = e.stats || {};
+    const badges = Object.entries(stats)
+      .filter(([k,v]) => typeof v === 'number')
+      .slice(0, 4)
+      .map(([k,v]) => `<span class="hof-badge">${k}: ${v < 1 && v > 0 ? (v*100).toFixed(1)+'%' : v}</span>`)
+      .join('');
+
+    card.innerHTML = `
+      <span class="hof-icon">${icon}</span>
+      <div class="hof-name">${e.name}</div>
+      <div class="hof-title">${e.title}</div>
+      <div class="hof-desc">${e.description}</div>
+      <div class="hof-badges">${badges}</div>
+      <button class="hof-share" onclick="shareHoF(this, '${e.name}', '${e.title}')">Share</button>
+    `;
+    container.appendChild(card);
+  });
+}
+
+// === Interactions ===
+function renameAgent(id, name) {
+  state.agentNames[id] = name;
+  localStorage.setItem('varoldum_names', JSON.stringify(state.agentNames));
+}
+
+function toggleFollow(id) {
+  if (state.followedLineages[id]) delete state.followedLineages[id];
+  else state.followedLineages[id] = true;
+  localStorage.setItem('varoldum_follows', JSON.stringify(state.followedLineages));
+  updateAgents();
+}
+
+function checkFollowedLineageEvent(event) {
+  const lineageId = (event.data || {}).lineage_id;
+  if (lineageId && state.followedLineages[lineageId]) {
+    showNotification(event, state.agentNames[lineageId] || `Lineage #${lineageId}`);
+  }
+}
+
+function showNotification(event, lineageName) {
+  const div = document.createElement('div');
+  div.className = 'notification ' + (event.severity || '');
+  div.innerHTML = `
+    <span class="close" onclick="this.parentElement.remove()">&times;</span>
+    <strong>${lineageName}</strong><br>
+    ${event.title}<br>
+    <small style="color:var(--text-muted)">${event.description}</small>
+  `;
+  document.body.appendChild(div);
+  setTimeout(() => div.remove(), 10000);
+
+  if (Notification.permission === 'granted') {
+    new Notification(`Varoldum: ${lineageName}`, {
+      body: event.title + ' - ' + event.description,
+    });
+  }
+}
+
+function shareHoF(btn, name, title) {
+  const text = `${name} - ${title}\n\nVaroldum: The First Digital Civilization\n#Varoldum #ArtificialLife #DigitalEvolution`;
+  if (navigator.share) {
+    navigator.share({ title: 'Varoldum Hall of Fame', text: text });
+  } else {
+    navigator.clipboard.writeText(text).then(() => {
+      btn.textContent = 'Copied!';
+      setTimeout(() => { btn.textContent = 'Share'; }, 2000);
+    });
+  }
+}
+
+if ('Notification' in window && Notification.permission === 'default') {
+  document.addEventListener('click', () => Notification.requestPermission(), { once: true });
+}
+
+// === Main loop ===
+async function refresh() {
+  await Promise.all([
+    updateStatus(), updateTimeline(), updateAgents(),
+    updateRules(), updateConsciousness(), updateChart(),
+    updateHallOfFame(), updateSystem(),
+  ]);
+}
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>
