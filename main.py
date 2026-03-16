@@ -38,6 +38,7 @@ def parse_args():
     p.add_argument("--height", type=int, default=None)
     p.add_argument("--output", type=str, default="output")
     p.add_argument("--quiet", action="store_true")
+    p.add_argument("--no-gpu", action="store_true", help="Disable GPU batch, use CPU numpy only")
     p.add_argument("--resume", nargs="?", const="auto", default=None)
     p.add_argument("--checkpoint-interval", type=int, default=5000)
     return p.parse_args()
@@ -309,8 +310,11 @@ def main():
     max_complexity_ever = 0
     births_this_period = 0
     deaths_this_period = 0
+    use_gpu = not args.no_gpu
+    profile_accum = {"world": 0, "perceive": 0, "think": 0, "actions": 0, "update": 0, "ticks": 0}
 
     for tick in range(start_tick, cfg.max_ticks):
+        t0 = time.time()
         env.update(tick)
         physics.update(tick, env.season_phase, grid.cells)
         structures.update(tick)
@@ -319,6 +323,7 @@ def main():
             grid.stamp_agent(agent.x, agent.y)
 
         _spatial.build(agents)
+        t1 = time.time()
 
         for agent in agents:
             nearby = count_nearby(agent, agents, radius=4)
@@ -326,12 +331,15 @@ def main():
             agent.perceive(grid, env.light_level, agent_rng,
                           season=env.season_phase, physics=physics,
                           nearby_agents=nearby, heard_signal=heard)
+        t2 = time.time()
 
-        contexts = {}
-        for agent in agents:
-            contexts[agent.id] = agent.prepare_context()
-
-        gpu_results = batch_think(agents, contexts)
+        if use_gpu:
+            contexts = {}
+            for agent in agents:
+                contexts[agent.id] = agent.prepare_context()
+            gpu_results = batch_think(agents, contexts)
+        else:
+            gpu_results = None
 
         actions = []
         if gpu_results:
@@ -346,10 +354,13 @@ def main():
             for agent in agents:
                 agent.think()
                 actions.append(agent.act())
+        t3 = time.time()
 
         new_agents, agent_data = resolve_actions(
             grid, physics, structures, agents, actions, cfg, evo_rng
         )
+        t3b = time.time()
+        profile_accum["actions"] += t3b - t3
 
         for agent, action in zip(agents, actions):
             if agent.is_alive:
@@ -386,6 +397,13 @@ def main():
 
             agent.update(reward, energy_gained=eg, damage_taken=dmg,
                         temperature=temp, mineral_found=mineral, toxin_exposure=toxin)
+        t4 = time.time()
+
+        profile_accum["world"] += t1 - t0
+        profile_accum["perceive"] += t2 - t1
+        profile_accum["think"] += t3 - t2
+        profile_accum["update"] += t4 - t3
+        profile_accum["ticks"] += 1
 
         dead = [a for a in agents if not a.is_alive]
         for a in dead:
@@ -501,6 +519,11 @@ def main():
                 elapsed = time.time() - start_time
                 tps = (tick - start_tick + 1) / max(0.001, elapsed)
                 st = struct_stats.get("total_structures", 0)
+                pt = profile_accum["ticks"] or 1
+                prof_str = (f"world={profile_accum['world']/pt*1000:.0f}ms "
+                           f"perc={profile_accum['perceive']/pt*1000:.0f}ms "
+                           f"think={profile_accum['think']/pt*1000:.0f}ms "
+                           f"upd={profile_accum['update']/pt*1000:.0f}ms")
                 print(
                     f"[t={tick:>6d}] pop={stats['count']:>3d} "
                     f"gen={stats['max_generation']:>3d} "
@@ -510,9 +533,9 @@ def main():
                     f"think={mean_think_steps:.1f} "
                     f"concepts={n_with_concepts}({mean_concept_acc:.2f}) "
                     f"struct={st} "
-                    f"self={behavior['mean_self_model_accuracy']:.2f} "
-                    f"({tps:.0f}t/s)"
+                    f"({tps:.1f}t/s) [{prof_str}]"
                 )
+                profile_accum = {"world": 0, "perceive": 0, "think": 0, "actions": 0, "update": 0, "ticks": 0}
 
         if tick % cfg.snapshot_interval == 0 and tick > 0:
             logger.log_snapshot(tick, agents)
