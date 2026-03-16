@@ -12,7 +12,7 @@ def self_model_accuracy(agent) -> float:
 
 def information_integration_proxy(agent) -> float:
     hidden = agent.brain.hidden_state
-    sensor = agent._sensor_vec
+    sensor = agent._raw_input
 
     if len(hidden) == 0 or len(sensor) == 0:
         return 0.0
