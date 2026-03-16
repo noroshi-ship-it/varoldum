@@ -284,9 +284,14 @@ function dataset(label, data, key, color, opts = {}) {
 }
 
 async function fetchJSON(url) {
-  const resp = await fetch(url);
-  if (!resp.ok) return null;
-  return resp.json();
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) return null;
+    return await resp.json();
+  } catch(e) {
+    console.error('Fetch error:', url, e);
+    return null;
+  }
 }
 
 async function loadAll() {
@@ -568,7 +573,38 @@ document.getElementById('tabs').addEventListener('click', e => {
   document.getElementById('panel-' + e.target.dataset.panel).classList.add('active');
 });
 
-loadAll();
+// Initial load + auto-refresh every 30s
+let _charts = [];
+let _refreshInterval = null;
+
+async function refresh() {
+  // Destroy existing charts before re-rendering
+  for (const c of _charts) { try { c.destroy(); } catch(e) {} }
+  _charts = [];
+  // Clear dynamic content
+  ['kpis','discoveredRules','composableRules','eventList','hofGrid'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      if (id === 'discoveredRules') el.innerHTML = '<h2>Discovered Rules</h2>';
+      else if (id === 'composableRules') el.innerHTML = '<h2>Composable Rules</h2>';
+      else if (id === 'eventList') el.innerHTML = '';
+      else if (id === 'hofGrid') el.innerHTML = '';
+      else el.innerHTML = '';
+    }
+  });
+  await loadAll();
+}
+
+// Patch makeChart to track instances
+const _origMakeChart = makeChart;
+makeChart = function(...args) {
+  const c = _origMakeChart(...args);
+  if (c) _charts.push(c);
+  return c;
+};
+
+refresh();
+_refreshInterval = setInterval(refresh, 30000);
 </script>
 </body>
 </html>
