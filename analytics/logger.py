@@ -27,6 +27,7 @@ class Logger:
             self._initialized.add(category)
 
         self._csv_writers[category].writerow(row)
+        self._csv_files[category].flush()
 
     def log_snapshot(self, tick: int, agents: list, label: str = "snapshot"):
         if not agents:
