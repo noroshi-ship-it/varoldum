@@ -191,13 +191,26 @@
         "accuracy": 0.9672131147540983,
         "tests": 61
       }
+    },
+    {
+      "tick": 500,
+      "type": "world_model_milestone",
+      "severity": "milestone",
+      "icon": "eye",
+      "title": "World Model >90% Accuracy",
+      "description": "Agent #123 can predict the world with >90% accuracy. Bottleneck: 13 concepts, Think: 2 steps",
+      "data": {
+        "agent_id": 123,
+        "accuracy": 0.904427809765851,
+        "bottleneck": 13
+      }
     }
   ],
   "state": {
     "seen_first_concept": true,
     "seen_first_signal": true,
     "seen_first_complex": true,
-    "seen_wm_90": false,
+    "seen_wm_90": true,
     "max_generation": 4
   }
 }
