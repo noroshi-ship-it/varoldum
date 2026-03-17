@@ -175,7 +175,7 @@ class Agent:
 
     def perceive(self, grid, light_level, rng, season=0.0, physics=None,
                  nearby_agents=0, heard_signal=None, ecology=None,
-                 structures=None):
+                 structures=None, disasters=None):
         self._hyp_rng = rng
         self._ensure_systems(rng)
 
@@ -202,6 +202,18 @@ class Agent:
             )
         else:
             self._extra_sensor = np.array([])
+
+        # Disaster warning signals — subtle precursors that big brains can learn
+        self._disaster_warnings = np.zeros(4)
+        if disasters is not None:
+            x, y = self.body.x, self.body.y
+            warnings = disasters.get_disaster_warnings(x, y)
+            self._disaster_warnings = np.array([
+                warnings["tremor"],
+                warnings["flood"],
+                warnings["drought"],
+                warnings["plague"],
+            ])
 
         self._body_features = np.array([
             self.body.energy,
@@ -299,6 +311,7 @@ class Agent:
             self._extra_sensor,
             mortality_vec,
             heard_meaning[:min(4, len(heard_meaning))],  # first 4 dims of decoded meaning
+            self._disaster_warnings,  # 4 dims: tremor, flood, drought, plague
         ])
         return self._context
 
@@ -641,8 +654,8 @@ class Agent:
     @classmethod
     def estimate_max_nn_params(cls, cfg):
         from neural.bottleneck_brain import BottleneckBrain
-        max_arch = np.array([4, 128, 128, 64, 32, 64])
-        max_concept = np.array([16, 8, 0.05])
+        max_arch = np.array([4, 256, 256, 128, 64, 128])
+        max_concept = np.array([32, 8, 0.05])
         extra = 9
         context_dim = cfg.context_dim + cfg.internal_state_dim + extra
         brain = BottleneckBrain(RAW_INPUT_DIM, context_dim, cfg.action_dim,

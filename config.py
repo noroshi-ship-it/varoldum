@@ -92,6 +92,7 @@ class Config:
             + self.signal_dim
             + 3   # mortality: survival_prob, time_to_death, death_awareness
             + 4   # decoded token meaning (first 4 dims)
+            + 4   # disaster warnings: tremor, flood, drought, plague
         )
 
     @property

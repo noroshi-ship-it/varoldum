@@ -105,7 +105,7 @@ def count_nearby(agent, agents, radius=4):
     return count
 
 
-def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng, ecology=None, tick=0):
+def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng, ecology=None, tick=0, disasters=None):
     """
     Context-based physics resolution.
     6 generic force channels — physics determines meaning from context.
@@ -293,8 +293,34 @@ def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng, ec
             agent.body.take_damage(rad_dmg)
             data["damage"] += rad_dmg
 
+        # === DISASTER DAMAGE ===
+        disaster_dmg = 0.0
+        if disasters is not None:
+            dd = disasters.get_disaster_damage(x, y)
+            # Earthquake: direct structural damage
+            if dd["earthquake"] > 0.05:
+                eq_dmg = dd["earthquake"] * 0.3
+                agent.body.take_damage(eq_dmg)
+                disaster_dmg += eq_dmg
+            # Flood: drowning damage (scales with flood level)
+            if dd["flood"] > 0.03:
+                fl_dmg = dd["flood"] * 0.2
+                agent.body.take_damage(fl_dmg)
+                agent.body.energy -= dd["flood"] * 0.05  # energy drain from struggling
+                disaster_dmg += fl_dmg
+            # Drought: slow starvation (energy drain, not health)
+            if dd["drought"] > 0.1:
+                agent.body.energy -= dd["drought"] * 0.01
+            # Plague: sickness damage
+            if dd["plague"] > 0.05:
+                pl_dmg = dd["plague"] * 0.08
+                agent.body.take_damage(pl_dmg)
+                agent.body.energy -= dd["plague"] * 0.03  # sickness drains energy
+                disaster_dmg += pl_dmg
+            data["disaster_damage"] = disaster_dmg
+
         data["toxin"] = toxin
-        data["damage"] += hazard_dmg + toxin_dmg + trap_dmg
+        data["damage"] += hazard_dmg + toxin_dmg + trap_dmg + disaster_dmg
 
         agent_data[agent.id] = data
 
@@ -443,7 +469,8 @@ def main():
             agent.perceive(grid, env.light_level, agent_rng,
                           season=env.season_phase, physics=physics,
                           nearby_agents=nearby, heard_signal=heard,
-                          ecology=ecology, structures=structures)
+                          ecology=ecology, structures=structures,
+                          disasters=env.disasters)
         t2 = time.time()
 
         if use_gpu:
@@ -470,7 +497,8 @@ def main():
         t3 = time.time()
 
         new_agents, agent_data = resolve_actions(
-            grid, physics, structures, agents, actions, cfg, evo_rng, ecology=ecology, tick=tick
+            grid, physics, structures, agents, actions, cfg, evo_rng, ecology=ecology, tick=tick,
+            disasters=env.disasters
         )
         t3b = time.time()
         profile_accum["actions"] += t3b - t3
@@ -757,6 +785,7 @@ def main():
                 "mean_grief": mean_grief,
                 "total_bonds": total_bonds,
                 "total_debts": total_debts,
+                **{f"disaster_{k}": v for k, v in env.disasters.get_stats().items()},
             }
             logger.log_dict("population", tick, log_data)
             births_this_period = 0

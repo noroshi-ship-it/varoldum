@@ -4,17 +4,17 @@ from neural.layers import DenseLayer, GRULayer
 
 
 MIN_BOTTLENECK = 2
-MAX_BOTTLENECK = 16
+MAX_BOTTLENECK = 32
 
 
 def decode_bottleneck_architecture(arch_genes: np.ndarray, concept_genes: np.ndarray) -> dict:
     n_layers = int(np.clip(round(arch_genes[0]), 1, 4))
     layer_sizes = []
     for i in range(n_layers):
-        size = int(np.clip(round(arch_genes[1 + i]), 8, 128))
+        size = int(np.clip(round(arch_genes[1 + i]), 8, 256))
         size = max(8, (size // 4) * 4)
         layer_sizes.append(size)
-    gru_size = int(np.clip(round(arch_genes[5]), 4, 64))
+    gru_size = int(np.clip(round(arch_genes[5]), 4, 128))
     gru_size = max(4, (gru_size // 4) * 4)
 
     bottleneck_size = int(np.clip(round(concept_genes[0]), MIN_BOTTLENECK, MAX_BOTTLENECK))

@@ -1,7 +1,0 @@
-{
-  "tick": 1000,
-  "n_agents": 1995,
-  "max_generation": 5,
-  "mean_energy": 0.7025101080620924,
-  "top_agent_reward": 779.8230590820312
-}

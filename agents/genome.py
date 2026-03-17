@@ -160,7 +160,7 @@ def clamp_genome(genome: np.ndarray):
         genome[idx] = np.clip(genome[idx], lo, hi)
     genome[ARCH_OFFSET + 0] = np.clip(genome[ARCH_OFFSET + 0], 1, 4)
     for i in range(1, 5):
-        genome[ARCH_OFFSET + i] = np.clip(genome[ARCH_OFFSET + i], 8, 128)
+        genome[ARCH_OFFSET + i] = np.clip(genome[ARCH_OFFSET + i], 8, 256)
     genome[ARCH_OFFSET + 5] = np.clip(genome[ARCH_OFFSET + 5], 16, 128)
     for i in range(MORPH_COUNT):
         genome[MORPH_OFFSET + i] = np.clip(genome[MORPH_OFFSET + i], 0, 1)
