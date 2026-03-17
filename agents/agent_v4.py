@@ -370,39 +370,24 @@ class Agent:
         if token_utterance is not None:
             self._last_spoken_tokens = token_utterance.copy()
 
-        # Phase 4: Mortality-modulated reproduction threshold
-        reproduce_intent = float(a[3]) > 0.5
-        if self.mortality.survival_prob < 0.3 and self.mortality.mortality_sensitivity > 0.5:
-            reproduce_intent = reproduce_intent or float(a[3]) > 0.2
-
+        # All outputs continuous — brain decides everything, no thresholds
+        # [0,1] mapped from tanh [-1,1] for positive-only intensities
         return {
             "move_dx": float(a[0]) * speed,
             "move_dy": float(a[1]) * speed,
-            "eat": float(a[2]) > 0,
-            "reproduce": reproduce_intent,
-            "signal": float((a[4] + 1) / 2) * self.morphology.visibility,
+            "eat": (float(a[2]) + 1) / 2,                  # [0,1] intensity
+            "reproduce": (float(a[3]) + 1) / 2,             # [0,1] drive
+            "signal": (float(a[4]) + 1) / 2 * self.morphology.visibility,
             "turn": float(a[5]) * 0.3,
-            "collect_mineral": float(a[6]) > 0 if len(a) > 6 else False,
-            "combine": float(a[7]) > 0.3 if len(a) > 7 else False,
-            "build": self._get_build_action(a),
-            "deposit": float(a[2]) > 0.8 and self.body.energy > 0.5,
-            "withdraw": float(a[2]) > 0 and self.body.energy < 0.3,
+            "collect": (float(a[6]) + 1) / 2,               # [0,1] collect intensity
+            "craft": (float(a[7]) + 1) / 2,                 # [0,1] craft/combine/build
+            "build_pattern": float(a[0]) + float(a[1]) * 2 + float(a[5]) * 3,
             "utterance": utterance,
             "token_utterance": token_utterance,
-            "inscribe": speak_intent > 0.5 and float(a[7]) > 0.5 if len(a) > 7 else False,
-            "social_give": float(a[12]) if len(a) > 12 else 0.0,
-            "social_take": float(a[13]) if len(a) > 13 else 0.0,
+            "speak_intent": speak_intent,
+            "social_give": float(a[12]) if len(a) > 12 else 0.0,  # [-1,1]
+            "social_take": float(a[13]) if len(a) > 13 else 0.0,  # [-1,1]
         }
-
-    def _get_build_action(self, a) -> int:
-        if len(a) < 8:
-            return 0
-        build_intent = float(a[4]) > 0.7 and float(a[7]) > 0.5 and self.body.energy > 0.4
-        if not build_intent:
-            return 0
-        pattern = float(a[0]) + float(a[1]) * 2 + float(a[5]) * 3
-        stype = int(abs(pattern * 3) % 6) + 1
-        return stype
 
 
     def update(self, reward, energy_gained=0.0, damage_taken=0.0,
@@ -581,10 +566,10 @@ class Agent:
         return debt * 0.5 + bond * 0.3
 
     def observe_partner_death(self, dead_id: int):
-        """A bonded partner died — trigger grief."""
+        """A bonded partner died — grief proportional to bond strength."""
         bond = self._bonds.pop(dead_id, 0.0)
-        if bond > 0.2:
-            self._grief_level = min(1.0, self._grief_level + bond * 0.8)
+        # No threshold — any bond produces proportional grief
+        self._grief_level = min(1.0, self._grief_level + bond * 0.8)
         self._debts.pop(dead_id, None)
 
     def decay_social_state(self):
@@ -624,12 +609,13 @@ class Agent:
 
     def inherit_composable_rules(self, parent_agent, rng):
         for i, rule in enumerate(parent_agent.composable.rules):
-            if i < len(self.composable.rules) and rule.accuracy > 0.5:
+            if i < len(self.composable.rules):
+                # Inherit proportionally: accuracy acts as weight, not gate
                 self.composable.rules[i] = parent_agent.composable._mutate(rule, rng)
 
     def inherit_concept_hypotheses(self, parent_agent, rng):
         for i, hyp in enumerate(parent_agent.concept_hyp.hypotheses):
-            if i < len(self.concept_hyp.hypotheses) and hyp.accuracy > 0.5:
+            if i < len(self.concept_hyp.hypotheses):
                 self.concept_hyp.hypotheses[i] = self.concept_hyp._mutate(hyp, rng)
 
     @property

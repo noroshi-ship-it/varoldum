@@ -52,19 +52,23 @@ class InternalState:
         temp_discomfort = abs(temperature - 0.5) * 2.0
         self.temperature_comfort += dt * ((1.0 - temp_discomfort) - self.temperature_comfort)
 
-        # Social need: rises when isolated, drops when agents nearby
-        isolation = 1.0 - min(1.0, nearby_agents / 3.0)
+        # Social need: continuous response to nearby agent count
+        # Genome sensitivity controls scale, not hardcoded "3 agents = full"
+        isolation = 1.0 / (1.0 + nearby_agents)  # smooth: 1→0.5→0.33→0.25...
         target_social = isolation * self._social_sensitivity_k
         self.social_need += dt * (target_social - self.social_need)
 
         # Trust state: drifts based on interaction outcomes
-        trust_delta = (positive_interaction * 0.3 - negative_interaction * 0.5) * self._trust_sensitivity_k
+        # Genome sensitivity controls how reactive, not hardcoded weights
+        trust_delta = (positive_interaction - negative_interaction) * self._trust_sensitivity_k * 0.1
         target_trust = np.clip(self.trust_state + trust_delta, 0, 1)
         self.trust_state += dt * (target_trust - self.trust_state)
+        # Natural decay toward neutral — prevents saturation
+        self.trust_state += dt * (0.5 - self.trust_state) * 0.05
 
-        # Social satisfaction: spikes on success, decays over time
-        satisfaction_decay = 0.02
-        target_sat = max(0, self.social_satisfaction - satisfaction_decay) + social_reward * 0.5 * self._social_reward_k
+        # Social satisfaction: spikes on social reward, decays naturally
+        decay = self.social_satisfaction * 0.03  # proportional decay, not fixed
+        target_sat = max(0, self.social_satisfaction - decay) + social_reward * self._social_reward_k * 0.3
         self.social_satisfaction += dt * (target_sat - self.social_satisfaction)
 
         self.hunger = float(np.clip(self.hunger, 0, 1))

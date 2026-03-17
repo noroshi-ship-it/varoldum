@@ -64,8 +64,13 @@ class LineageMemorySystem:
             return None
         # Weighted by accuracy
         accuracies = np.array([r["accuracy"] for r in pool.rules])
-        probs = accuracies / (accuracies.sum() + 1e-8)
-        idx = rng.choice(len(pool.rules), p=probs)
+        total = accuracies.sum()
+        if total <= 0:
+            idx = rng.integers(0, len(pool.rules))
+        else:
+            probs = accuracies / total
+            probs = probs / probs.sum()  # ensure exact sum to 1.0
+            idx = rng.choice(len(pool.rules), p=probs)
         return pool.rules[idx]
 
     def cleanup(self, active_lineages: set[int]):

@@ -14,6 +14,12 @@ class CulturalEvent:
 
 
 class CultureSystem:
+    """
+    Brain-driven cultural transmission.
+    No hardcoded probabilities — the agent's signal output drives teaching.
+    No age cutoffs — youth factor is continuous.
+    No lineage bonuses — brain sees lineage as input, decides itself.
+    """
 
     def __init__(self):
         self.events: list[CulturalEvent] = []
@@ -23,23 +29,31 @@ class CultureSystem:
         self.total_lineage_studies = 0
 
     def process_teaching(self, agents: list, tick: int, rng: np.random.Generator,
-                         lineage_memory=None):
+                         lineage_memory=None, actions: list = None):
         self._tick_events = []
 
-        # Build nearby-agents lookup for efficiency
         alive = [a for a in agents if a.is_alive]
         if not alive:
             return
 
+        # Build action lookup for brain-driven teaching
+        action_map = {}
+        if actions is not None:
+            for agent, action in zip(agents, actions):
+                action_map[agent.id] = action
+
         for teacher in alive:
+            # Teacher's signal output drives teaching intent
+            teacher_action = action_map.get(teacher.id, {})
+            teacher_signal = teacher_action.get("signal", 0)
+            if teacher_signal <= 0:
+                continue  # brain says don't broadcast
+
             best_rules = teacher.hypotheses.get_best_hypotheses(
-                min_tests=15, min_accuracy=0.7
+                min_tests=5, min_accuracy=0.5
             )
             if not best_rules:
                 continue
-
-            # Fitness rank for this teacher (higher = better teacher)
-            teacher_fitness = teacher.total_reward
 
             for student in alive:
                 if student.id == teacher.id:
@@ -47,25 +61,25 @@ class CultureSystem:
 
                 dx = abs(teacher.body.position[0] - student.body.position[0])
                 dy = abs(teacher.body.position[1] - student.body.position[1])
-                if dx > 2 or dy > 2:
+                # Physics: distance limits communication
+                max_range = 4.0
+                if dx > max_range or dy > max_range:
                     continue
 
-                # Fitness-weighted probability instead of flat 2%
-                base_prob = 0.005
-                fitness_bonus = min(2.0, max(0.1, teacher_fitness / max(1, abs(student.total_reward) + 1)))
+                # Proximity falloff (physics)
+                dist = max(dx, dy)
+                proximity = 1.0 - dist / max_range
 
-                # Lineage trust bonus
-                lineage_bonus = 1.0
-                if teacher.lineage_id == student.lineage_id and teacher.lineage_id != -1:
-                    lineage_bonus = 3.0
+                # Teaching force = teacher's signal * proximity
+                # No base_prob, no lineage_bonus, no fitness_bonus
+                teach_force = teacher_signal * proximity
 
-                # Student receptivity from genome
-                receptivity = 1.0
-                if hasattr(student, '_teaching_receptivity'):
-                    receptivity = student._teaching_receptivity
+                # Receptivity from genome (not a threshold — a multiplier)
+                receptivity = getattr(student, '_teaching_receptivity', 1.0)
+                teach_force *= receptivity
 
-                prob = base_prob * fitness_bonus * lineage_bonus * receptivity
-                if rng.random() > prob:
+                # Stochastic: force as probability
+                if rng.random() > teach_force:
                     continue
 
                 rule = best_rules[0]
@@ -74,7 +88,7 @@ class CultureSystem:
                 if student_hyps:
                     worst_idx = min(range(len(student_hyps)),
                                    key=lambda i: student_hyps[i].accuracy * student_hyps[i].confidence
-                                   if student_hyps[i].tests > 3 else 1.0)
+                                   if student_hyps[i].tests > 0 else 1.0)
 
                     from agents.hypothesis import Hypothesis, Condition
                     new_conditions = [
@@ -100,7 +114,7 @@ class CultureSystem:
 
                     # Contribute to lineage memory
                     if lineage_memory is not None:
-                        encoded = teacher.hypotheses.encode_best(min_accuracy=0.7)
+                        encoded = teacher.hypotheses.encode_best(min_accuracy=0.5)
                         if encoded is not None:
                             lineage_memory.contribute(
                                 teacher.lineage_id, encoded,
@@ -108,38 +122,39 @@ class CultureSystem:
                                 teacher.generation, tick,
                             )
 
-                    # Teacher social satisfaction boost
+                    # Teacher social satisfaction
                     if hasattr(teacher, '_pending_social_reward'):
                         teacher._pending_social_reward += 0.2
 
-                    break
+                    break  # one student per teacher per tick
 
     def process_lineage_study(self, agents: list, lineage_memory, tick: int,
                               rng: np.random.Generator):
-        """Young agents study from their lineage's cultural memory pool."""
+        """Agents study from lineage memory — youth as continuous factor, not cutoff."""
         if lineage_memory is None:
             return
 
         for agent in agents:
             if not agent.is_alive:
                 continue
-            # Only young agents study (age < 200 ticks)
-            if agent.body.age > 200:
-                continue
-            # Cooldown check
+            # Cooldown (physics: learning takes time)
             if hasattr(agent, '_lineage_study_cooldown') and agent._lineage_study_cooldown > 0:
                 agent._lineage_study_cooldown -= 1
                 continue
 
-            # Study probability
-            if rng.random() > 0.01:
+            # Continuous youth factor — young agents study more, not binary cutoff
+            youth = max(0.0, 1.0 - agent.body.age / 500.0)
+            # Curiosity drives study
+            curiosity = agent.internal.curiosity if hasattr(agent, 'internal') else 0.5
+            study_drive = youth * curiosity
+
+            if rng.random() > study_drive * 0.05:
                 continue
 
             rule_data = lineage_memory.study(agent.lineage_id, rng)
             if rule_data is None:
                 continue
 
-            # Try to absorb the rule
             encoded = rule_data.get("encoded")
             if encoded is not None and hasattr(agent.hypotheses, 'decode_and_replace_worst'):
                 agent.hypotheses.decode_and_replace_worst(encoded)
@@ -153,8 +168,15 @@ class CultureSystem:
                 agent._lineage_study_cooldown = 50
 
     def process_imitation(self, agents: list, tick: int, rng: np.random.Generator):
+        """Imitation driven by agent's social_need — not random probability."""
         for agent in agents:
-            if not agent.is_alive or rng.random() > 0.01:
+            if not agent.is_alive:
+                continue
+
+            # Social need drives imitation: lonely/uncertain agents learn from others
+            social_need = agent.internal.social_need if hasattr(agent, 'internal') else 0.5
+            imitation_drive = social_need * 0.03
+            if rng.random() > imitation_drive:
                 continue
 
             best_neighbor = None
@@ -165,20 +187,16 @@ class CultureSystem:
                     continue
                 dx = abs(agent.body.position[0] - other.body.position[0])
                 dy = abs(agent.body.position[1] - other.body.position[1])
-                if dx > 3 or dy > 3:
+                # Physics: can only observe nearby
+                if dx > 4 or dy > 4:
                     continue
                 if other.total_reward > best_reward:
                     best_neighbor = other
                     best_reward = other.total_reward
 
             if best_neighbor is not None:
-                # Trust-weighted imitation: higher trust = stronger learning
-                trust_weight = 1.0
-                if hasattr(agent, 'trust_memory'):
-                    trust_weight = 0.5 + agent.trust_memory.get_trust(best_neighbor.id)
-
                 if hasattr(agent, 'composable') and hasattr(best_neighbor, 'composable'):
-                    lr = 0.05 * trust_weight
+                    lr = 0.05
                     for my_rule, their_rule in zip(agent.composable.rules,
                                                     best_neighbor.composable.rules):
                         n = min(len(my_rule.action_bias), len(their_rule.action_bias))

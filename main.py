@@ -109,10 +109,10 @@ def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng, ec
     new_agents = []
     agent_data = {}
 
-    # Cooperative foraging: count eaters per cell for group bonus
+    # Cooperative foraging: sum eat intensity per cell for group bonus
     eat_cells = {}
     for agent, action in zip(agents, actions):
-        if agent.is_alive and action.get("eat"):
+        if agent.is_alive and action.get("eat", 0) > 0:
             cell_key = (agent.x, agent.y)
             eat_cells[cell_key] = eat_cells.get(cell_key, 0) + 1
 
@@ -146,68 +146,81 @@ def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng, ec
         if structures.get_nest_bonus(x, y):
             agent.body.energy += 0.001
 
-        if action["eat"]:
-            consumed = grid.consume_resource(x, y, amount=0.3)
+        eat_intent = action.get("eat", 0)
+        if eat_intent > 0:
+            # Brain controls how much to eat — intensity scales bite size
+            consumed = grid.consume_resource(x, y, amount=eat_intent * 0.3)
             farm_bonus = structures.get_farm_bonus(x, y)
-            if farm_bonus > 0:
-                consumed *= (1.0 + farm_bonus)
+            consumed *= (1.0 + farm_bonus)
             if ecology is not None:
-                plant_nut, plant_tox = ecology.consume_plants(x, y, amount=0.1)
+                plant_nut, plant_tox = ecology.consume_plants(x, y, amount=eat_intent * 0.1)
                 consumed += plant_nut
                 agent.body.take_damage(plant_tox * 0.3)
                 data["damage"] += plant_tox * 0.3
-            # Cooperative foraging bonus: continuous scaling with number of co-eaters
+            # Cooperative foraging: continuous bonus per extra eater
             n_eaters = eat_cells.get((x, y), 1)
-            consumed *= 1.0 + 0.15 * max(0, n_eaters - 1)  # 15% per extra eater, continuous
+            consumed *= 1.0 + 0.15 * max(0, n_eaters - 1)
             agent.body.eat(consumed)
             data["energy_gained"] = consumed
 
-        # Parental care: continuous distance falloff, not binary gate
-        if agent.parent_id > 0 and agent.body.age < 100:
+        # Parental care: continuous distance AND age falloff — no cutoffs
+        if agent.parent_id > 0:
             parent_pos = parent_positions.get(agent.parent_id)
             if parent_pos is not None:
                 pdist = toroidal_distance(agent.body.position, parent_pos,
                                           cfg.world_width, cfg.world_height)
-                # Continuous falloff: full effect at dist=0, zero at dist=5
                 care_range = 5.0
-                care_strength = max(0.0, 1.0 - pdist / care_range)
-                if care_strength > 0.0:
-                    agent.body.energy += 0.003 * care_strength
-                    agent.body.health = min(1.0, agent.body.health + 0.0015 * care_strength)
+                proximity = max(0.0, 1.0 - pdist / care_range)
+                # Youth factor: continuous decay, not age cutoff
+                youth = max(0.0, 1.0 - agent.body.age / 200.0)
+                care = proximity * youth
+                if care > 0.0:
+                    agent.body.energy += 0.003 * care
+                    agent.body.health = min(1.0, agent.body.health + 0.0015 * care)
 
-        if action["collect_mineral"]:
-            available = physics.consume_mineral(x, y, 0.2)
+        collect_intent = action.get("collect", 0)
+        if collect_intent > 0:
+            available = physics.consume_mineral(x, y, collect_intent * 0.2)
             collected = agent.body.collect_mineral(available)
             data["mineral"] = collected
-            # Phase 5D: Also collect top substance into inventory
+            # Substance collection: intensity scales amount
             if hasattr(agent, 'inventory'):
                 top_ids, top_concs = physics.chemistry.get_top_substances(x, y, n=1)
-                if len(top_concs) > 0 and top_concs[0] > 0.05:
+                if len(top_concs) > 0 and top_concs[0] > 0:
                     top_sid = int(top_ids[0])
-                    consumed = physics.chemistry.consume_substance(x, y, top_sid, 0.1)
+                    consumed = physics.chemistry.consume_substance(
+                        x, y, top_sid, collect_intent * 0.1)
                     agent.inventory.add_item(top_sid, consumed)
 
-        if action["combine"] and agent.body.mineral_carried > 0.1 and agent.body.energy > 0.2:
-            heal = physics.apply_medicine(0.1, agent.body.mineral_carried)
+        craft_intent = action.get("craft", 0)
+        if craft_intent > 0 and agent.body.mineral_carried > 0:
+            # Combine: intensity scales how much mineral to use
+            use_amount = craft_intent * min(0.1, agent.body.mineral_carried)
+            heal = physics.apply_medicine(use_amount, agent.body.mineral_carried)
             if heal > 0:
                 agent.body.heal_medicine(heal)
                 data["medicine"] = heal
 
-        build_type = action["build"]
-        if build_type > 0:
-            cost = BUILD_COST.get(build_type, 0.15)
+        # Build: craft_intent as probability — brain decides how much effort
+        if craft_intent > 0 and evo_rng.random() < craft_intent * 0.1:
+            pattern = action.get("build_pattern", 0)
+            stype = int(abs(pattern * 3) % 6) + 1
+            cost = BUILD_COST.get(stype, 0.15)
+            # Physics: need energy for materials
             if agent.body.energy > cost:
-                if structures.build(build_type, x, y, agent.lineage_id):
+                if structures.build(stype, x, y, agent.lineage_id):
                     agent.body.energy -= cost
                     data["structure_built"] = True
 
-        if action["deposit"]:
-            deposited = structures.deposit_resource(x, y, 0.1)
+        # Storage: collect intent negative half → deposit, positive at structure → withdraw
+        if collect_intent < 0.3:
+            deposit_amount = (1.0 - collect_intent) * 0.1
+            deposited = structures.deposit_resource(x, y, deposit_amount)
             if deposited > 0:
                 agent.body.energy -= deposited
-
-        if action["withdraw"]:
-            withdrawn = structures.withdraw_resource(x, y, 0.1)
+        elif collect_intent > 0.5:
+            withdraw_amount = collect_intent * 0.1
+            withdrawn = structures.withdraw_resource(x, y, withdraw_amount)
             if withdrawn > 0:
                 agent.body.energy += withdrawn
 
@@ -238,17 +251,19 @@ def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng, ec
         data["toxin"] = toxin
         data["damage"] += hazard_dmg + toxin_dmg + trap_dmg
 
-        if action["signal"] > 0.1:
-            grid.stamp_agent(x, y, action["signal"])
+        signal = action.get("signal", 0)
+        if signal > 0:
+            grid.stamp_agent(x, y, signal)
         physics.stamp_scent(x, y, 0.3)
 
-        # Inscription: write tokens onto nearby structure
-        if action.get("inscribe") and action.get("token_utterance") is not None:
+        # Inscription: speak_intent drives inscription — continuous
+        speak = action.get("speak_intent", 0)
+        if speak > 0 and action.get("token_utterance") is not None:
             concepts = agent.brain.get_concepts()
             structures.inscribe(x, y, action["token_utterance"],
                                 concepts, agent.lineage_id, tick)
 
-        if action["reproduce"] and agent.can_reproduce():
+        if action.get("reproduce", 0) > 0 and agent.can_reproduce():
             mate = find_mate(agent, agents, cfg)
             if mate is not None:
                 child = reproduce_sexual(agent, mate, cfg, evo_rng)
@@ -470,9 +485,10 @@ def main():
             data = agent_data.get(agent.id, {})
             eg = data.get("energy_gained", 0)
             dmg = data.get("damage", 0)
-            outcome_positive = eg > 0.01 or dmg < 0.01
+            # Continuous outcome score instead of binary judgment
+            outcome_score = eg - dmg  # positive = net benefit
             speaker = agent_by_id.get(agent._heard_tokens.sender_id)
-            if speaker is not None and outcome_positive:
+            if speaker is not None and outcome_score > 0:
                 # Both parties benefit from successful communication
                 speaker._pending_positive_interaction += 0.3
                 speaker._pending_social_reward += 0.1
@@ -480,7 +496,7 @@ def main():
                 agent._pending_social_reward += 0.05
 
         if tick % 5 == 0:
-            culture.process_teaching(agents, tick, agent_rng, lineage_memory=lineage_memory)
+            culture.process_teaching(agents, tick, agent_rng, lineage_memory=lineage_memory, actions=actions)
             culture.process_lineage_study(agents, lineage_memory, tick, agent_rng)
             culture.process_imitation(agents, tick, agent_rng)
             culture.cleanup()
@@ -542,11 +558,10 @@ def main():
                     # Grief: if observer was bonded to the dead agent
                     if hasattr(observer, 'observe_partner_death'):
                         observer.observe_partner_death(a.id)
-                    # Negative interaction signal for emotional state
+                    # Negative interaction proportional to bond — no threshold
                     if hasattr(observer, '_pending_negative_interaction'):
                         bond = observer._bonds.get(a.id, 0) if hasattr(observer, '_bonds') else 0
-                        if bond > 0.1:
-                            observer._pending_negative_interaction += bond
+                        observer._pending_negative_interaction += bond
         deaths_this_period += len(dead)
         births_this_period += len(new_agents)
         agents = [a for a in agents if a.is_alive]
