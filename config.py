@@ -25,7 +25,7 @@ class Config:
 
     hidden_size: int = 32
     gru_hidden_size: int = 16
-    action_dim: int = 14
+    action_dim: int = 6
     self_model_hidden: int = 16
 
     signal_dim: int = 4

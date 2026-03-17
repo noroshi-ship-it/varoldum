@@ -106,17 +106,25 @@ def count_nearby(agent, agents, radius=4):
 
 
 def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng, ecology=None, tick=0):
+    """
+    Context-based physics resolution.
+    6 generic force channels — physics determines meaning from context.
+    mouth > 0 on food = eat. mouth > 0 on mineral = collect. mouth < 0 = emit/deposit.
+    manipulate > 0 with material = craft/build.
+    social is handled separately in social.py.
+    signal > 0 = broadcast.
+    """
     new_agents = []
     agent_data = {}
 
-    # Cooperative foraging: sum eat intensity per cell for group bonus
-    eat_cells = {}
+    # Count absorbers per cell for cooperative foraging bonus
+    mouth_cells = {}
     for agent, action in zip(agents, actions):
-        if agent.is_alive and action.get("eat", 0) > 0:
+        if agent.is_alive and action.get("mouth", 0) > 0:
             cell_key = (agent.x, agent.y)
-            eat_cells[cell_key] = eat_cells.get(cell_key, 0) + 1
+            mouth_cells[cell_key] = mouth_cells.get(cell_key, 0) + 1
 
-    # Parental care map: parent positions for child bonus
+    # Parental care map
     parent_positions = {}
     for agent in agents:
         if agent.is_alive and agent.children_count > 0:
@@ -130,6 +138,7 @@ def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng, ec
                 "toxin": 0.0, "medicine": 0.0, "temperature": 0.5,
                 "structure_built": False, "teaching_done": False}
 
+        # === MOVEMENT (a[0], a[1]) ===
         new_dx = action["move_dx"]
         new_dy = action["move_dy"]
         new_x = int(round(agent.body.position[0] + new_dx)) % cfg.world_width
@@ -138,32 +147,115 @@ def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng, ec
             new_dx *= 0.1
             new_dy *= 0.1
         agent.body.move(new_dx, new_dy, cfg.world_width, cfg.world_height)
-        agent.body.heading += action["turn"]
 
         x, y = agent.x, agent.y
         data["temperature"] = physics.get_temperature(x, y)
 
+        # Nest bonus (physics: shelter provides warmth)
         if structures.get_nest_bonus(x, y):
             agent.body.energy += 0.001
 
-        eat_intent = action.get("eat", 0)
-        if eat_intent > 0:
-            # Brain controls how much to eat — intensity scales bite size
-            consumed = grid.consume_resource(x, y, amount=eat_intent * 0.3)
+        # === MOUTH: intake/output with environment (a[2]) ===
+        mouth = action.get("mouth", 0)
+
+        if mouth > 0:
+            # Positive mouth = absorb from environment
+            # CONTEXT: what's here determines what gets absorbed
+            intensity = mouth  # [0, 1] after tanh mapping... actually [-1,1]
+            # mouth is raw [-1,1], positive half = absorb intensity
+            absorb = mouth  # 0 to 1
+
+            # Food absorption
+            consumed = grid.consume_resource(x, y, amount=absorb * 0.3)
             farm_bonus = structures.get_farm_bonus(x, y)
             consumed *= (1.0 + farm_bonus)
             if ecology is not None:
-                plant_nut, plant_tox = ecology.consume_plants(x, y, amount=eat_intent * 0.1)
+                plant_nut, plant_tox = ecology.consume_plants(x, y, amount=absorb * 0.1)
                 consumed += plant_nut
                 agent.body.take_damage(plant_tox * 0.3)
                 data["damage"] += plant_tox * 0.3
-            # Cooperative foraging: continuous bonus per extra eater
-            n_eaters = eat_cells.get((x, y), 1)
+            # Cooperative foraging
+            n_eaters = mouth_cells.get((x, y), 1)
             consumed *= 1.0 + 0.15 * max(0, n_eaters - 1)
             agent.body.eat(consumed)
             data["energy_gained"] = consumed
 
-        # Parental care: continuous distance AND age falloff — no cutoffs
+            # Mineral absorption (same mouth force, different material)
+            mineral_available = physics.consume_mineral(x, y, absorb * 0.2)
+            collected = agent.body.collect_mineral(mineral_available)
+            data["mineral"] = collected
+
+            # Substance collection into inventory
+            if hasattr(agent, 'inventory'):
+                top_ids, top_concs = physics.chemistry.get_top_substances(x, y, n=1)
+                if len(top_concs) > 0 and top_concs[0] > 0:
+                    top_sid = int(top_ids[0])
+                    sub_consumed = physics.chemistry.consume_substance(
+                        x, y, top_sid, absorb * 0.1)
+                    agent.inventory.add_item(top_sid, sub_consumed)
+
+            # Withdraw from storage structure (mouth absorb at structure)
+            withdrawn = structures.withdraw_resource(x, y, absorb * 0.1)
+            if withdrawn > 0:
+                agent.body.energy += withdrawn
+
+        elif mouth < 0:
+            # Negative mouth = emit/deposit to environment
+            emit = -mouth  # 0 to 1
+            deposited = structures.deposit_resource(x, y, emit * 0.1)
+            if deposited > 0:
+                agent.body.energy -= deposited
+
+        # === MANIPULATE: transform materials (a[4]) ===
+        manipulate = action.get("manipulate", 0)
+
+        if manipulate > 0:
+            # Positive manipulate = craft/build
+            # CONTEXT: if carrying minerals → combine into medicine
+            if agent.body.mineral_carried > 0:
+                use_amount = manipulate * min(0.1, agent.body.mineral_carried)
+                heal = physics.apply_medicine(use_amount, agent.body.mineral_carried)
+                if heal > 0:
+                    agent.body.heal_medicine(heal)
+                    data["medicine"] = heal
+
+            # CONTEXT: enough energy → build structure
+            # manipulate intensity as probability (physics: effort → chance)
+            if evo_rng.random() < manipulate * 0.05:
+                # Structure type from movement pattern (emergent)
+                pattern = action["move_dx"] + action["move_dy"] * 2
+                stype = int(abs(pattern * 3) % 6) + 1
+                cost = BUILD_COST.get(stype, 0.15)
+                if agent.body.energy > cost:
+                    if structures.build(stype, x, y, agent.lineage_id):
+                        agent.body.energy -= cost
+                        data["structure_built"] = True
+
+        # === SIGNAL: broadcast (a[5]) ===
+        signal = action.get("signal", 0)
+        if signal > 0:
+            grid.stamp_agent(x, y, signal)
+            # Inscription: signal at structure = write
+            if action.get("token_utterance") is not None:
+                concepts = agent.brain.get_concepts()
+                structures.inscribe(x, y, action["token_utterance"],
+                                    concepts, agent.lineage_id, tick)
+        physics.stamp_scent(x, y, 0.3)
+
+        # === REPRODUCTION: emergent from social + mouth + energy ===
+        # When social force is positive AND mouth is positive AND enough energy
+        # Physics: two compatible organisms exchanging resources = offspring
+        social = action.get("social", 0)
+        if social > 0 and mouth > 0 and agent.can_reproduce():
+            mate = find_mate(agent, agents, cfg)
+            if mate is not None:
+                child = reproduce_sexual(agent, mate, cfg, evo_rng)
+            else:
+                child = reproduce_asexual(agent, cfg, evo_rng)
+            if child is not None and len(agents) + len(new_agents) < cfg.max_population:
+                new_agents.append(child)
+
+        # === PARENTAL CARE: physics — proximity + youth ===
         if agent.parent_id > 0:
             parent_pos = parent_positions.get(agent.parent_id)
             if parent_pos is not None:
@@ -171,59 +263,13 @@ def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng, ec
                                           cfg.world_width, cfg.world_height)
                 care_range = 5.0
                 proximity = max(0.0, 1.0 - pdist / care_range)
-                # Youth factor: continuous decay, not age cutoff
                 youth = max(0.0, 1.0 - agent.body.age / 200.0)
                 care = proximity * youth
                 if care > 0.0:
                     agent.body.energy += 0.003 * care
                     agent.body.health = min(1.0, agent.body.health + 0.0015 * care)
 
-        collect_intent = action.get("collect", 0)
-        if collect_intent > 0:
-            available = physics.consume_mineral(x, y, collect_intent * 0.2)
-            collected = agent.body.collect_mineral(available)
-            data["mineral"] = collected
-            # Substance collection: intensity scales amount
-            if hasattr(agent, 'inventory'):
-                top_ids, top_concs = physics.chemistry.get_top_substances(x, y, n=1)
-                if len(top_concs) > 0 and top_concs[0] > 0:
-                    top_sid = int(top_ids[0])
-                    consumed = physics.chemistry.consume_substance(
-                        x, y, top_sid, collect_intent * 0.1)
-                    agent.inventory.add_item(top_sid, consumed)
-
-        craft_intent = action.get("craft", 0)
-        if craft_intent > 0 and agent.body.mineral_carried > 0:
-            # Combine: intensity scales how much mineral to use
-            use_amount = craft_intent * min(0.1, agent.body.mineral_carried)
-            heal = physics.apply_medicine(use_amount, agent.body.mineral_carried)
-            if heal > 0:
-                agent.body.heal_medicine(heal)
-                data["medicine"] = heal
-
-        # Build: craft_intent as probability — brain decides how much effort
-        if craft_intent > 0 and evo_rng.random() < craft_intent * 0.1:
-            pattern = action.get("build_pattern", 0)
-            stype = int(abs(pattern * 3) % 6) + 1
-            cost = BUILD_COST.get(stype, 0.15)
-            # Physics: need energy for materials
-            if agent.body.energy > cost:
-                if structures.build(stype, x, y, agent.lineage_id):
-                    agent.body.energy -= cost
-                    data["structure_built"] = True
-
-        # Storage: collect intent negative half → deposit, positive at structure → withdraw
-        if collect_intent < 0.3:
-            deposit_amount = (1.0 - collect_intent) * 0.1
-            deposited = structures.deposit_resource(x, y, deposit_amount)
-            if deposited > 0:
-                agent.body.energy -= deposited
-        elif collect_intent > 0.5:
-            withdraw_amount = collect_intent * 0.1
-            withdrawn = structures.withdraw_resource(x, y, withdraw_amount)
-            if withdrawn > 0:
-                agent.body.energy += withdrawn
-
+        # === ENVIRONMENTAL DAMAGE (pure physics) ===
         hazard = grid.get_cell(x, y)[1]
         hazard_dmg = hazard * 0.1
         agent.body.take_damage(hazard_dmg)
@@ -237,12 +283,11 @@ def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng, ec
         agent.body.take_damage(toxin_dmg)
         if ecology is not None:
             pred_danger = ecology.get_predator_danger(x, y)
-            if pred_danger > 0.01 and evo_rng.random() < pred_danger:
+            if pred_danger > 0 and evo_rng.random() < pred_danger:
                 pred_dmg = pred_danger * 0.3
                 agent.body.take_damage(pred_dmg)
                 data["damage"] += pred_dmg
 
-        # Hidden radiation damage (agents feel it but can't see the source)
         rad_dmg = physics.hidden.get_radiation_damage(x, y)
         if rad_dmg > 0:
             agent.body.take_damage(rad_dmg)
@@ -250,27 +295,6 @@ def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng, ec
 
         data["toxin"] = toxin
         data["damage"] += hazard_dmg + toxin_dmg + trap_dmg
-
-        signal = action.get("signal", 0)
-        if signal > 0:
-            grid.stamp_agent(x, y, signal)
-        physics.stamp_scent(x, y, 0.3)
-
-        # Inscription: speak_intent drives inscription — continuous
-        speak = action.get("speak_intent", 0)
-        if speak > 0 and action.get("token_utterance") is not None:
-            concepts = agent.brain.get_concepts()
-            structures.inscribe(x, y, action["token_utterance"],
-                                concepts, agent.lineage_id, tick)
-
-        if action.get("reproduce", 0) > 0 and agent.can_reproduce():
-            mate = find_mate(agent, agents, cfg)
-            if mate is not None:
-                child = reproduce_sexual(agent, mate, cfg, evo_rng)
-            else:
-                child = reproduce_asexual(agent, cfg, evo_rng)
-            if child is not None and len(agents) + len(new_agents) < cfg.max_population:
-                new_agents.append(child)
 
         agent_data[agent.id] = data
 

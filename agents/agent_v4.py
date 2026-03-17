@@ -361,32 +361,40 @@ class Agent:
     def act(self):
         a = self._action
         speed = self.morphology.speed_multiplier
-        utterance = a[8:12] if len(a) >= 12 else np.zeros(self._cfg.signal_dim)
 
-        # Phase 3: Discrete token utterance
-        speak_intent = float(a[8]) if len(a) > 8 else 0.0
+        # 6 generic force channels — physics determines meaning from context
+        # a[0]: move_x        — movement force
+        # a[1]: move_y        — movement force
+        # a[2]: mouth         — intake/output with environment (+absorb, -emit)
+        # a[3]: social        — directed force toward nearby agents (+give, -take)
+        # a[4]: manipulate    — transform/combine/build force
+        # a[5]: signal        — communication emission intensity
+
+        mouth = float(a[2])       # [-1, 1]
+        social = float(a[3])      # [-1, 1]
+        manipulate = float(a[4])  # [-1, 1]
+        signal_raw = float(a[5])  # [-1, 1]
+
+        # Utterance: derived from signal channel + brain concepts
+        # Signal strength determines if/how much the agent broadcasts
+        signal_strength = (signal_raw + 1) / 2 * self.morphology.visibility
         concepts = self.brain.get_concepts()
-        token_utterance = self.discrete_vocab.encode_utterance(concepts, speak_intent)
+        token_utterance = self.discrete_vocab.encode_utterance(concepts, signal_raw)
         if token_utterance is not None:
             self._last_spoken_tokens = token_utterance.copy()
 
-        # All outputs continuous — brain decides everything, no thresholds
-        # [0,1] mapped from tanh [-1,1] for positive-only intensities
+        # Utterance vector: concepts modulated by signal
+        utterance = concepts[:self._cfg.signal_dim] * signal_strength if len(concepts) >= self._cfg.signal_dim else np.zeros(self._cfg.signal_dim)
+
         return {
             "move_dx": float(a[0]) * speed,
             "move_dy": float(a[1]) * speed,
-            "eat": (float(a[2]) + 1) / 2,                  # [0,1] intensity
-            "reproduce": (float(a[3]) + 1) / 2,             # [0,1] drive
-            "signal": (float(a[4]) + 1) / 2 * self.morphology.visibility,
-            "turn": float(a[5]) * 0.3,
-            "collect": (float(a[6]) + 1) / 2,               # [0,1] collect intensity
-            "craft": (float(a[7]) + 1) / 2,                 # [0,1] craft/combine/build
-            "build_pattern": float(a[0]) + float(a[1]) * 2 + float(a[5]) * 3,
+            "mouth": mouth,                    # [-1,1] +absorb -emit
+            "social": social,                  # [-1,1] +give -take
+            "manipulate": manipulate,          # [-1,1] +craft/build -deconstruct
+            "signal": signal_strength,         # [0,1] broadcast intensity
             "utterance": utterance,
             "token_utterance": token_utterance,
-            "speak_intent": speak_intent,
-            "social_give": float(a[12]) if len(a) > 12 else 0.0,  # [-1,1]
-            "social_take": float(a[13]) if len(a) > 13 else 0.0,  # [-1,1]
         }
 
 
