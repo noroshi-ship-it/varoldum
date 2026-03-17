@@ -1,0 +1,203 @@
+{
+  "events": [
+    {
+      "tick": 100,
+      "type": "first_concept_rule",
+      "severity": "milestone",
+      "icon": "brain",
+      "title": "First Concept Rule Discovered",
+      "description": "Agent #6 (gen 0) discovered: IF C5>-0.75 THEN ENERGY_UP [acc=0.98, n=100]",
+      "data": {
+        "agent_id": 6,
+        "rule": "IF C5>-0.75 THEN ENERGY_UP [acc=0.98, n=100]",
+        "accuracy": 0.98
+      }
+    },
+    {
+      "tick": 100,
+      "type": "concept_breakthrough",
+      "severity": "milestone",
+      "icon": "star",
+      "title": "Concept Breakthrough",
+      "description": "Rule #1: IF C5>-0.75 THEN ENERGY_UP [acc=0.98, n=100] by lineage 6",
+      "data": {
+        "rule": "IF C5>-0.75 THEN ENERGY_UP [acc=0.98, n=100]",
+        "accuracy": 0.98,
+        "tests": 100
+      }
+    },
+    {
+      "tick": 100,
+      "type": "concept_breakthrough",
+      "severity": "milestone",
+      "icon": "star",
+      "title": "Concept Breakthrough",
+      "description": "Rule #2: IF C1<-0.07 AND C5<0.66 THEN ENERGY_UP [acc=0.99, n=73] by lineage 131",
+      "data": {
+        "rule": "IF C1<-0.07 AND C5<0.66 THEN ENERGY_UP [acc=0.99, n=73]",
+        "accuracy": 0.9863013698630136,
+        "tests": 73
+      }
+    },
+    {
+      "tick": 100,
+      "type": "concept_breakthrough",
+      "severity": "milestone",
+      "icon": "star",
+      "title": "Concept Breakthrough",
+      "description": "Rule #3: IF temp_comfort>-0.73 THEN ENERGY_UP [acc=0.95, n=101] by lineage 327",
+      "data": {
+        "rule": "IF temp_comfort>-0.73 THEN ENERGY_UP [acc=0.95, n=101]",
+        "accuracy": 0.9504950495049505,
+        "tests": 101
+      }
+    },
+    {
+      "tick": 100,
+      "type": "first_signal",
+      "severity": "milestone",
+      "icon": "speech",
+      "title": "First Proto-Language Signals",
+      "description": "Agents are broadcasting and hearing signals. 22218 sent, 184306 heard",
+      "data": {
+        "signals_sent": 22218,
+        "signals_heard": 184306,
+        "unique_senders": 450
+      }
+    },
+    {
+      "tick": 100,
+      "type": "first_complex_rule",
+      "severity": "milestone",
+      "icon": "puzzle",
+      "title": "First Complex Rule (4+ conditions)",
+      "description": "Agent #7 evolved: complex rule",
+      "data": {
+        "agent_id": 7,
+        "complexity": 4
+      }
+    },
+    {
+      "tick": 200,
+      "type": "population_boom",
+      "severity": "growth",
+      "icon": "rocket",
+      "title": "Population Boom",
+      "description": "Population doubled from 453 to 1993",
+      "data": {
+        "from": 453,
+        "to": 1993
+      }
+    },
+    {
+      "tick": 200,
+      "type": "concept_breakthrough",
+      "severity": "milestone",
+      "icon": "star",
+      "title": "Concept Breakthrough",
+      "description": "Rule #10: IF fear>0.40 AND C3<0.00 AND temp_comfort>-0.71 AND C7>-0.20 AND fear>0.24 THEN ENERGY_UP [acc=0.99, n=98] by lineage 196",
+      "data": {
+        "rule": "IF fear>0.40 AND C3<0.00 AND temp_comfort>-0.71 AND C7>-0.20 AND fear>0.24 THEN ENERGY_UP [acc=0.99, n=98]",
+        "accuracy": 0.9897959183673469,
+        "tests": 98
+      }
+    },
+    {
+      "tick": 300,
+      "type": "concept_breakthrough",
+      "severity": "milestone",
+      "icon": "star",
+      "title": "Concept Breakthrough",
+      "description": "Rule #25: IF C4<-0.36 AND C4<-0.47 THEN ENERGY_UP [acc=0.96, n=102] by lineage 106",
+      "data": {
+        "rule": "IF C4<-0.36 AND C4<-0.47 THEN ENERGY_UP [acc=0.96, n=102]",
+        "accuracy": 0.9607843137254902,
+        "tests": 102
+      }
+    },
+    {
+      "tick": 100,
+      "type": "concept_breakthrough",
+      "severity": "milestone",
+      "icon": "star",
+      "title": "Concept Breakthrough",
+      "description": "Rule #1: IF C5>-0.75 THEN ENERGY_UP [acc=0.98, n=99] by lineage 6",
+      "data": {
+        "rule": "IF C5>-0.75 THEN ENERGY_UP [acc=0.98, n=99]",
+        "accuracy": 0.9797979797979798,
+        "tests": 99
+      }
+    },
+    {
+      "tick": 100,
+      "type": "concept_breakthrough",
+      "severity": "milestone",
+      "icon": "star",
+      "title": "Concept Breakthrough",
+      "description": "Rule #2: IF fear>0.58 AND health>0.19 THEN ENERGY_UP [acc=0.96, n=99] by lineage 216",
+      "data": {
+        "rule": "IF fear>0.58 AND health>0.19 THEN ENERGY_UP [acc=0.96, n=99]",
+        "accuracy": 0.9595959595959596,
+        "tests": 99
+      }
+    },
+    {
+      "tick": 100,
+      "type": "concept_breakthrough",
+      "severity": "milestone",
+      "icon": "star",
+      "title": "Concept Breakthrough",
+      "description": "Rule #3: IF C8<0.45 AND hunger>-0.35 AND C4>-0.76 THEN ENERGY_UP [acc=0.96, n=53] by lineage 40",
+      "data": {
+        "rule": "IF C8<0.45 AND hunger>-0.35 AND C4>-0.76 THEN ENERGY_UP [acc=0.96, n=53]",
+        "accuracy": 0.9622641509433962,
+        "tests": 53
+      }
+    },
+    {
+      "tick": 200,
+      "type": "population_boom",
+      "severity": "growth",
+      "icon": "rocket",
+      "title": "Population Boom",
+      "description": "Population doubled from 441 to 1990",
+      "data": {
+        "from": 441,
+        "to": 1990
+      }
+    },
+    {
+      "tick": 200,
+      "type": "concept_breakthrough",
+      "severity": "milestone",
+      "icon": "star",
+      "title": "Concept Breakthrough",
+      "description": "Rule #10: IF temp_comfort>0.25 AND C6>-0.12 THEN ENERGY_UP [acc=0.99, n=116] by lineage 106",
+      "data": {
+        "rule": "IF temp_comfort>0.25 AND C6>-0.12 THEN ENERGY_UP [acc=0.99, n=116]",
+        "accuracy": 0.9913793103448276,
+        "tests": 116
+      }
+    },
+    {
+      "tick": 200,
+      "type": "concept_breakthrough",
+      "severity": "milestone",
+      "icon": "star",
+      "title": "Concept Breakthrough",
+      "description": "Rule #25: IF C5<0.73 AND hunger>-0.03 AND C8>-0.29 AND hunger>-0.67 AND C3>0.06 THEN SAFE [acc=0.97, n=61] by lineage 436",
+      "data": {
+        "rule": "IF C5<0.73 AND hunger>-0.03 AND C8>-0.29 AND hunger>-0.67 AND C3>0.06 THEN SAFE [acc=0.97, n=61]",
+        "accuracy": 0.9672131147540983,
+        "tests": 61
+      }
+    }
+  ],
+  "state": {
+    "seen_first_concept": true,
+    "seen_first_signal": true,
+    "seen_first_complex": true,
+    "seen_wm_90": false,
+    "max_generation": 4
+  }
+}

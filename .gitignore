@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 *.pyo
-output/
 *.pkl
 .env
+output_test/
+output_test2/
