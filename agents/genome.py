@@ -53,7 +53,23 @@ ABSTRACT_LOCI = {
     "mortality_sensitivity":  (ABSTRACT_OFFSET + 7, 0.0, 2.0),
 }
 
-FIXED_GENE_COUNT = NUM_TRAIT_GENES + ARCH_COUNT + MORPH_COUNT + CONCEPT_COUNT + ABSTRACT_COUNT
+# Society engine genes (Phase 5)
+SOCIETY_OFFSET = ABSTRACT_OFFSET + ABSTRACT_COUNT  # 39
+SOCIETY_COUNT = 7
+
+SOCIETY_LOCI = {
+    # Phase 5A: Social emotions
+    "social_sensitivity":       (SOCIETY_OFFSET + 0, 0.0, 2.0),
+    "trust_sensitivity":        (SOCIETY_OFFSET + 1, 0.0, 2.0),
+    "social_reward_sensitivity": (SOCIETY_OFFSET + 2, 0.0, 2.0),
+    # Phase 5D: Trade
+    "trade_willingness":        (SOCIETY_OFFSET + 3, 0.0, 1.0),
+    "utility_pref_0":           (SOCIETY_OFFSET + 4, 0.0, 1.0),
+    "utility_pref_1":           (SOCIETY_OFFSET + 5, 0.0, 1.0),
+    "inventory_capacity":       (SOCIETY_OFFSET + 6, 2.0, 6.0),
+}
+
+FIXED_GENE_COUNT = NUM_TRAIT_GENES + ARCH_COUNT + MORPH_COUNT + CONCEPT_COUNT + ABSTRACT_COUNT + SOCIETY_COUNT
 
 
 def random_genome(cfg: Config, max_nn_params: int, rng: np.random.Generator) -> np.ndarray:
@@ -86,6 +102,15 @@ def random_genome(cfg: Config, max_nn_params: int, rng: np.random.Generator) -> 
     genes[ABSTRACT_OFFSET + 6] = rng.uniform(0.2, 0.6)     # listen_weight
     genes[ABSTRACT_OFFSET + 7] = rng.uniform(0.5, 1.5)     # mortality_sensitivity
 
+    # Society genes
+    genes[SOCIETY_OFFSET + 0] = rng.uniform(0.5, 1.5)     # social_sensitivity
+    genes[SOCIETY_OFFSET + 1] = rng.uniform(0.5, 1.5)     # trust_sensitivity
+    genes[SOCIETY_OFFSET + 2] = rng.uniform(0.5, 1.5)     # social_reward_sensitivity
+    genes[SOCIETY_OFFSET + 3] = rng.uniform(0.2, 0.6)     # trade_willingness
+    genes[SOCIETY_OFFSET + 4] = rng.uniform(0.2, 0.8)     # utility_pref_0
+    genes[SOCIETY_OFFSET + 5] = rng.uniform(0.2, 0.8)     # utility_pref_1
+    genes[SOCIETY_OFFSET + 6] = rng.uniform(2.0, 4.0)     # inventory_capacity
+
     nn_start = FIXED_GENE_COUNT
     genes[nn_start:] = rng.standard_normal(max_nn_params) * 0.3
 
@@ -96,6 +121,10 @@ def get_abstract_genes(genome: np.ndarray) -> np.ndarray:
     return genome[ABSTRACT_OFFSET:ABSTRACT_OFFSET + ABSTRACT_COUNT]
 
 
+def get_society_genes(genome: np.ndarray) -> np.ndarray:
+    return genome[SOCIETY_OFFSET:SOCIETY_OFFSET + SOCIETY_COUNT]
+
+
 def get_trait(genome: np.ndarray, name: str) -> float:
     if name in LOCI:
         idx, lo, hi = LOCI[name]
@@ -103,6 +132,8 @@ def get_trait(genome: np.ndarray, name: str) -> float:
         idx, lo, hi = CONCEPT_LOCI[name]
     elif name in ABSTRACT_LOCI:
         idx, lo, hi = ABSTRACT_LOCI[name]
+    elif name in SOCIETY_LOCI:
+        idx, lo, hi = SOCIETY_LOCI[name]
     else:
         raise KeyError(f"Unknown trait: {name}")
     return float(np.clip(genome[idx], lo, hi))
@@ -136,4 +167,6 @@ def clamp_genome(genome: np.ndarray):
     for name, (idx, lo, hi) in CONCEPT_LOCI.items():
         genome[idx] = np.clip(genome[idx], lo, hi)
     for name, (idx, lo, hi) in ABSTRACT_LOCI.items():
+        genome[idx] = np.clip(genome[idx], lo, hi)
+    for name, (idx, lo, hi) in SOCIETY_LOCI.items():
         genome[idx] = np.clip(genome[idx], lo, hi)

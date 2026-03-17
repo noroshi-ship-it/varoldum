@@ -436,6 +436,26 @@ class HypothesisSystem:
             if h.tests >= min_tests and h.accuracy >= min_accuracy
         ]
 
+    def encode_best(self, min_accuracy: float = 0.7) -> np.ndarray | None:
+        """Encode the best hypothesis for lineage memory contribution."""
+        best = [h for h in self.hypotheses if h.tests >= 10 and h.accuracy >= min_accuracy]
+        if not best:
+            return None
+        best.sort(key=lambda h: h.accuracy, reverse=True)
+        return best[0].encode()
+
+    def decode_and_replace_worst(self, encoded: np.ndarray):
+        """Decode an encoded hypothesis and replace the worst rule with it."""
+        if len(self.hypotheses) == 0:
+            return
+        new_rule = Hypothesis.decode(encoded, self.action_dim)
+        worst_idx = min(range(len(self.hypotheses)),
+                        key=lambda i: self.hypotheses[i].accuracy * self.hypotheses[i].confidence
+                        if self.hypotheses[i].tests > 3 else 1.0)
+        new_rule.tests = 3
+        new_rule.successes = 2
+        self.hypotheses[worst_idx] = new_rule
+
     def encode_all(self) -> np.ndarray:
         parts = []
         for h in self.hypotheses:

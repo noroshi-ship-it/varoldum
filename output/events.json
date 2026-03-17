@@ -204,6 +204,30 @@
         "accuracy": 0.904427809765851,
         "bottleneck": 13
       }
+    },
+    {
+      "tick": 800,
+      "type": "new_generation",
+      "severity": "evolution",
+      "icon": "dna",
+      "title": "Generation 5 Reached",
+      "description": "Evolution has produced generation 5",
+      "data": {
+        "generation": 5
+      }
+    },
+    {
+      "tick": 1100,
+      "type": "concept_breakthrough",
+      "severity": "milestone",
+      "icon": "star",
+      "title": "Concept Breakthrough",
+      "description": "Rule #50: IF temp_comfort>0.58 THEN SAFE [acc=0.99, n=82] by lineage 131",
+      "data": {
+        "rule": "IF temp_comfort>0.58 THEN SAFE [acc=0.99, n=82]",
+        "accuracy": 0.9878048780487805,
+        "tests": 82
+      }
     }
   ],
   "state": {
@@ -211,6 +235,6 @@
     "seen_first_signal": true,
     "seen_first_complex": true,
     "seen_wm_90": true,
-    "max_generation": 4
+    "max_generation": 5
   }
 }

@@ -12,6 +12,7 @@ from agents.morphology import Morphology
 from agents.composable_rules import ComposableRuleSystem
 from agents.symbol_system import SymbolCodebook
 from agents.discrete_language import DiscreteVocab
+from agents.inventory import Inventory, TrustMemory
 from agents.genome import (
     get_trait, get_nn_weights, get_arch_genes, get_morph_genes,
     get_concept_genes, random_genome, FIXED_GENE_COUNT
@@ -112,6 +113,36 @@ class Agent:
         self.mortality = MortalitySelfModel(
             self.bottleneck_size, mortality_sensitivity=mortality_sensitivity,
         )
+
+        # Phase 5: Society engine
+        inv_capacity = int(round(get_trait(genome, "inventory_capacity")))
+        self.inventory = Inventory(
+            inv_capacity,
+            get_trait(genome, "utility_pref_0"),
+            get_trait(genome, "utility_pref_1"),
+        )
+        self.trust_memory = TrustMemory()
+        self._trade_willingness = get_trait(genome, "trade_willingness")
+        self._teaching_receptivity = get_trait(genome, "trust_sensitivity")  # reuse as receptivity
+        self._pending_social_reward = 0.0
+        self._pending_positive_interaction = 0.0
+        self._pending_negative_interaction = 0.0
+        self._nearby_agent_count = 0
+        self._lineage_study_cooldown = 0
+        self._social_sensitivity_k = get_trait(genome, "social_sensitivity")
+
+        # Attachment: track specific partners (agent_id -> interaction_count)
+        self._bonds: dict[int, float] = {}  # agent_id -> bond_strength [0-1]
+        self._max_bonds = 4
+
+        # Reciprocity: track who helped me (agent_id -> debt)
+        self._debts: dict[int, float] = {}  # positive = I owe them
+
+        # Grief: decaying pain from bonded partner death
+        self._grief_level = 0.0
+
+        # Parental care tracking
+        self._children_ids: list[int] = []  # my children still alive
 
         nn_weights = get_nn_weights(genome)
         n_policy = self.brain.policy_param_count
@@ -359,6 +390,8 @@ class Agent:
             "utterance": utterance,
             "token_utterance": token_utterance,
             "inscribe": speak_intent > 0.5 and float(a[7]) > 0.5 if len(a) > 7 else False,
+            "social_give": float(a[12]) if len(a) > 12 else 0.0,
+            "social_take": float(a[13]) if len(a) > 13 else 0.0,
         }
 
     def _get_build_action(self, a) -> int:
@@ -386,7 +419,22 @@ class Agent:
             self.body.energy, self.body.health,
             self._raw_input, self.self_model.surprise,
             temperature=temperature,
+            nearby_agents=self._nearby_agent_count,
+            positive_interaction=self._pending_positive_interaction,
+            negative_interaction=self._pending_negative_interaction,
+            social_reward=self._pending_social_reward,
         )
+        # Reset pending social signals
+        self._pending_social_reward = 0.0
+        self._pending_positive_interaction = 0.0
+        self._pending_negative_interaction = 0.0
+
+        # Trust memory decay
+        if self.ticks_alive % 20 == 0:
+            self.trust_memory.decay(self.ticks_alive)
+
+        # Social state decay (bonds, debts, grief)
+        self.decay_social_state()
 
         actual_state = self.internal.as_vector()
         self.self_model.observe_actual(actual_state, self.learning_rate)
@@ -458,8 +506,16 @@ class Agent:
         brain_cost = self._cfg.brain_metabolic_cost * self.brain.param_count
         morph_cost = self.morphology.total_metabolic_cost
         think_cost = self._think_steps_used * self._cfg.think_energy_cost
+
+        # Isolation stress: high social_need increases metabolic cost
+        # This is physics — loneliness literally costs energy (stress hormones)
+        isolation_cost = self.internal.social_need * 0.002 * self._social_sensitivity_k
+        # Grief cost: recent partner loss adds stress
+        grief_cost = self._grief_level * 0.003
+
         temp_modifier = 0.7 + 0.6 * temperature
-        self.body.metabolize(brain_cost + morph_cost + think_cost, temp_modifier)
+        total_cost = brain_cost + morph_cost + think_cost + isolation_cost + grief_cost
+        self.body.metabolize(total_cost, temp_modifier)
         self.body.heal()
 
     def compute_intrinsic_reward(self, energy_gained, damage_taken,
@@ -502,6 +558,54 @@ class Agent:
         v_grad = np.clip(v_grad, -1.0, 1.0)
         value_params += lr * v_grad
         self.brain.set_value_params(value_params)
+
+    def strengthen_bond(self, other_id: int, amount: float = 0.05):
+        """Strengthen attachment bond with a specific agent."""
+        old = self._bonds.get(other_id, 0.0)
+        self._bonds[other_id] = min(1.0, old + amount)
+        # Prune weakest if over limit
+        if len(self._bonds) > self._max_bonds:
+            weakest = min(self._bonds, key=self._bonds.get)
+            if self._bonds[weakest] < 0.1:
+                del self._bonds[weakest]
+
+    def add_debt(self, helper_id: int, amount: float = 0.1):
+        """Record that helper_id helped me — I owe them."""
+        old = self._debts.get(helper_id, 0.0)
+        self._debts[helper_id] = min(1.0, old + amount)
+
+    def get_reciprocity_urge(self, other_id: int) -> float:
+        """How much do I feel I should help this agent?"""
+        debt = self._debts.get(other_id, 0.0)
+        bond = self._bonds.get(other_id, 0.0)
+        return debt * 0.5 + bond * 0.3
+
+    def observe_partner_death(self, dead_id: int):
+        """A bonded partner died — trigger grief."""
+        bond = self._bonds.pop(dead_id, 0.0)
+        if bond > 0.2:
+            self._grief_level = min(1.0, self._grief_level + bond * 0.8)
+        self._debts.pop(dead_id, None)
+
+    def decay_social_state(self):
+        """Decay grief, bonds, debts over time."""
+        self._grief_level *= 0.995  # slow decay
+        # Bonds decay if no interaction
+        dead_bonds = []
+        for aid in self._bonds:
+            self._bonds[aid] *= 0.999
+            if self._bonds[aid] < 0.01:
+                dead_bonds.append(aid)
+        for aid in dead_bonds:
+            del self._bonds[aid]
+        # Debts decay
+        dead_debts = []
+        for aid in self._debts:
+            self._debts[aid] *= 0.998
+            if self._debts[aid] < 0.01:
+                dead_debts.append(aid)
+        for aid in dead_debts:
+            del self._debts[aid]
 
     def can_reproduce(self):
         threshold = get_trait(self.genome, "reproduction_threshold")

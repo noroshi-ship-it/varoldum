@@ -20,6 +20,7 @@ from world.culture import CultureSystem
 from agents.agent_v4 import Agent
 from agents.language import ProtoLanguage
 from agents.discrete_language import DiscreteLanguageSystem
+from world.lineage_memory import LineageMemorySystem
 from evolution.reproduction import reproduce_asexual, reproduce_sexual
 from analytics.metrics import population_stats, genome_diversity, behavioral_complexity, trait_distribution
 from analytics.consciousness_probes import probe_all
@@ -108,6 +109,19 @@ def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng, ec
     new_agents = []
     agent_data = {}
 
+    # Cooperative foraging: count eaters per cell for group bonus
+    eat_cells = {}
+    for agent, action in zip(agents, actions):
+        if agent.is_alive and action.get("eat"):
+            cell_key = (agent.x, agent.y)
+            eat_cells[cell_key] = eat_cells.get(cell_key, 0) + 1
+
+    # Parental care map: parent positions for child bonus
+    parent_positions = {}
+    for agent in agents:
+        if agent.is_alive and agent.children_count > 0:
+            parent_positions[agent.id] = agent.body.position.copy()
+
     for agent, action in zip(agents, actions):
         if not agent.is_alive:
             continue
@@ -142,13 +156,36 @@ def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng, ec
                 consumed += plant_nut
                 agent.body.take_damage(plant_tox * 0.3)
                 data["damage"] += plant_tox * 0.3
+            # Cooperative foraging bonus: continuous scaling with number of co-eaters
+            n_eaters = eat_cells.get((x, y), 1)
+            consumed *= 1.0 + 0.15 * max(0, n_eaters - 1)  # 15% per extra eater, continuous
             agent.body.eat(consumed)
             data["energy_gained"] = consumed
+
+        # Parental care: continuous distance falloff, not binary gate
+        if agent.parent_id > 0 and agent.body.age < 100:
+            parent_pos = parent_positions.get(agent.parent_id)
+            if parent_pos is not None:
+                pdist = toroidal_distance(agent.body.position, parent_pos,
+                                          cfg.world_width, cfg.world_height)
+                # Continuous falloff: full effect at dist=0, zero at dist=5
+                care_range = 5.0
+                care_strength = max(0.0, 1.0 - pdist / care_range)
+                if care_strength > 0.0:
+                    agent.body.energy += 0.003 * care_strength
+                    agent.body.health = min(1.0, agent.body.health + 0.0015 * care_strength)
 
         if action["collect_mineral"]:
             available = physics.consume_mineral(x, y, 0.2)
             collected = agent.body.collect_mineral(available)
             data["mineral"] = collected
+            # Phase 5D: Also collect top substance into inventory
+            if hasattr(agent, 'inventory'):
+                top_ids, top_concs = physics.chemistry.get_top_substances(x, y, n=1)
+                if len(top_concs) > 0 and top_concs[0] > 0.05:
+                    top_sid = int(top_ids[0])
+                    consumed = physics.chemistry.consume_substance(x, y, top_sid, 0.1)
+                    agent.inventory.add_item(top_sid, consumed)
 
         if action["combine"] and agent.body.mineral_carried > 0.1 and agent.body.energy > 0.2:
             heal = physics.apply_medicine(0.1, agent.body.mineral_carried)
@@ -297,6 +334,7 @@ def main():
     ecology = Ecology(cfg.world_width, cfg.world_height, rng=world_rng)
     language = ProtoLanguage(cfg.world_width, cfg.world_height, cfg.hear_radius)
     discrete_lang = DiscreteLanguageSystem(cfg.world_width, cfg.world_height, cfg.hear_radius)
+    lineage_memory = LineageMemorySystem(max_rules_per_lineage=8)
 
     agents: list[Agent] = []
     if args.resume and ckpt:
@@ -357,6 +395,7 @@ def main():
 
         for agent in agents:
             nearby = count_nearby(agent, agents, radius=4)
+            agent._nearby_agent_count = nearby  # Phase 5A: feed social emotions
             heard = language.get_strongest_signal(agent, tick)
             # Phase 3: Pass heard discrete tokens
             heard_tokens = discrete_lang.get_nearest_utterance(
@@ -411,12 +450,43 @@ def main():
         language.cleanup(tick)
         discrete_lang.cleanup(tick)
 
-        social_rewards = social.resolve_social(agents, actions, tick)
+        substance_props = physics.chemistry.substance_props if hasattr(physics.chemistry, 'substance_props') else None
+        social_rewards, positive_ints, negative_ints = social.resolve_social(
+            agents, actions, tick, substance_props=substance_props)
+
+        # Phase 5A: Feed social interaction signals to agents for emotion update
+        for agent in agents:
+            if not agent.is_alive:
+                continue
+            agent._pending_positive_interaction += positive_ints.get(agent.id, 0)
+            agent._pending_negative_interaction += negative_ints.get(agent.id, 0)
+            agent._pending_social_reward += social_rewards.get(agent.id, 0) * 0.1
+
+        # Phase 5B: Communication reward - listener benefited from speaker's info
+        agent_by_id = {a.id: a for a in agents if a.is_alive}
+        for agent in agents:
+            if not agent.is_alive or agent._heard_tokens is None:
+                continue
+            data = agent_data.get(agent.id, {})
+            eg = data.get("energy_gained", 0)
+            dmg = data.get("damage", 0)
+            outcome_positive = eg > 0.01 or dmg < 0.01
+            speaker = agent_by_id.get(agent._heard_tokens.sender_id)
+            if speaker is not None and outcome_positive:
+                # Both parties benefit from successful communication
+                speaker._pending_positive_interaction += 0.3
+                speaker._pending_social_reward += 0.1
+                agent._pending_positive_interaction += 0.2
+                agent._pending_social_reward += 0.05
 
         if tick % 5 == 0:
-            culture.process_teaching(agents, tick, agent_rng)
+            culture.process_teaching(agents, tick, agent_rng, lineage_memory=lineage_memory)
+            culture.process_lineage_study(agents, lineage_memory, tick, agent_rng)
             culture.process_imitation(agents, tick, agent_rng)
             culture.cleanup()
+            # Cleanup extinct lineage pools
+            active_lineages = {a.lineage_id for a in agents if a.is_alive}
+            lineage_memory.cleanup(active_lineages)
 
         for agent in agents:
             if not agent.is_alive:
@@ -469,6 +539,14 @@ def main():
                 if observer.id != a.id and observer.is_alive:
                     observer.mortality.observe_nearby_death(
                         observer.brain.get_concepts(), dead_concepts, tick)
+                    # Grief: if observer was bonded to the dead agent
+                    if hasattr(observer, 'observe_partner_death'):
+                        observer.observe_partner_death(a.id)
+                    # Negative interaction signal for emotional state
+                    if hasattr(observer, '_pending_negative_interaction'):
+                        bond = observer._bonds.get(a.id, 0) if hasattr(observer, '_bonds') else 0
+                        if bond > 0.1:
+                            observer._pending_negative_interaction += bond
         deaths_this_period += len(dead)
         births_this_period += len(new_agents)
         agents = [a for a in agents if a.is_alive]
@@ -531,6 +609,14 @@ def main():
             mean_death_awareness = 0.0
             mean_thought_depth = 0.0
             total_vocab_used = 0
+            mean_social_need = 0.0
+            mean_trust_state = 0.0
+            mean_social_sat = 0.0
+            mean_inventory_fullness = 0.0
+            mean_trust_score = 0.0
+            mean_grief = 0.0
+            total_bonds = 0
+            total_debts = 0
 
             for a in agents:
                 mean_wm_acc += a.brain.cumulative_wm_accuracy
@@ -551,6 +637,15 @@ def main():
                 mean_death_awareness += a.mortality.get_death_awareness()
                 mean_thought_depth += a.brain._thought_depth
                 total_vocab_used += a.discrete_vocab.stats["vocab_used"]
+                # Society stats
+                mean_social_need += a.internal.social_need
+                mean_trust_state += a.internal.trust_state
+                mean_social_sat += a.internal.social_satisfaction
+                mean_inventory_fullness += a.inventory.fullness
+                mean_trust_score += a.trust_memory.mean_trust
+                mean_grief += a._grief_level
+                total_bonds += len(a._bonds)
+                total_debts += len(a._debts)
 
             n = max(1, len(agents))
             mean_wm_acc /= n
@@ -563,6 +658,13 @@ def main():
             mean_survival_prob /= n
             mean_death_awareness /= n
             mean_thought_depth /= n
+            mean_social_need /= n
+            mean_trust_state /= n
+            mean_social_sat /= n
+            mean_inventory_fullness /= n
+            mean_trust_score /= n
+            mean_grief /= n
+            lineage_stats = lineage_memory.get_stats()
 
             log_data = {
                 **stats, "diversity": diversity, **behavior,
@@ -602,6 +704,20 @@ def main():
                 "births": births_this_period,
                 "deaths": deaths_this_period,
                 "total_resource": float(np.sum(grid.cells[:, :, 0])),
+                # Society engine stats
+                "mean_social_need": mean_social_need,
+                "mean_trust_state": mean_trust_state,
+                "mean_social_satisfaction": mean_social_sat,
+                "mean_inventory_fullness": mean_inventory_fullness,
+                "mean_trust_score": mean_trust_score,
+                "inventory_trades": social_stats.get("inventory_trades", 0),
+                "lineage_pools": lineage_stats["pools"],
+                "lineage_rules_total": lineage_stats["rules"],
+                "lineage_mean_accuracy": lineage_stats["mean_accuracy"],
+                "lineage_studies": culture_stats.get("total_lineage_studies", 0),
+                "mean_grief": mean_grief,
+                "total_bonds": total_bonds,
+                "total_debts": total_debts,
             }
             logger.log_dict("population", tick, log_data)
             births_this_period = 0

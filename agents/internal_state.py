@@ -10,12 +10,26 @@ class InternalState:
         self.curiosity = 0.5
         self.temperature_comfort = 0.5
 
+        # Phase 5A: Social emotional needs
+        self.social_need = 0.0
+        self.trust_state = 0.5
+        self.social_satisfaction = 0.0
+
         self._hunger_k = get_trait(genome, "hunger_sensitivity")
         self._fear_k = get_trait(genome, "fear_sensitivity")
         self._curiosity_k = get_trait(genome, "curiosity_sensitivity")
 
+        # Social sensitivity genes
+        self._social_sensitivity_k = get_trait(genome, "social_sensitivity")
+        self._trust_sensitivity_k = get_trait(genome, "trust_sensitivity")
+        self._social_reward_k = get_trait(genome, "social_reward_sensitivity")
+
     def update(self, energy: float, health: float, sensor_vec: np.ndarray,
-               surprise: float, temperature: float = 0.5):
+               surprise: float, temperature: float = 0.5,
+               nearby_agents: int = 0,
+               positive_interaction: float = 0.0,
+               negative_interaction: float = 0.0,
+               social_reward: float = 0.0):
         dt = 0.1
 
         target_hunger = (1.0 - energy) * self._hunger_k
@@ -38,10 +52,31 @@ class InternalState:
         temp_discomfort = abs(temperature - 0.5) * 2.0
         self.temperature_comfort += dt * ((1.0 - temp_discomfort) - self.temperature_comfort)
 
+        # Social need: rises when isolated, drops when agents nearby
+        isolation = 1.0 - min(1.0, nearby_agents / 3.0)
+        target_social = isolation * self._social_sensitivity_k
+        self.social_need += dt * (target_social - self.social_need)
+
+        # Trust state: drifts based on interaction outcomes
+        trust_delta = (positive_interaction * 0.3 - negative_interaction * 0.5) * self._trust_sensitivity_k
+        target_trust = np.clip(self.trust_state + trust_delta, 0, 1)
+        self.trust_state += dt * (target_trust - self.trust_state)
+
+        # Social satisfaction: spikes on success, decays over time
+        satisfaction_decay = 0.02
+        target_sat = max(0, self.social_satisfaction - satisfaction_decay) + social_reward * 0.5 * self._social_reward_k
+        self.social_satisfaction += dt * (target_sat - self.social_satisfaction)
+
         self.hunger = float(np.clip(self.hunger, 0, 1))
         self.fear = float(np.clip(self.fear, 0, 1))
         self.curiosity = float(np.clip(self.curiosity, 0, 1))
         self.temperature_comfort = float(np.clip(self.temperature_comfort, 0, 1))
+        self.social_need = float(np.clip(self.social_need, 0, 1))
+        self.trust_state = float(np.clip(self.trust_state, 0, 1))
+        self.social_satisfaction = float(np.clip(self.social_satisfaction, 0, 1))
 
     def as_vector(self) -> np.ndarray:
-        return np.array([self.hunger, self.fear, self.curiosity, self.temperature_comfort])
+        return np.array([
+            self.hunger, self.fear, self.curiosity, self.temperature_comfort,
+            self.social_need, self.trust_state, self.social_satisfaction,
+        ])

@@ -25,7 +25,7 @@ class Config:
 
     hidden_size: int = 32
     gru_hidden_size: int = 16
-    action_dim: int = 12
+    action_dim: int = 14
     self_model_hidden: int = 16
 
     signal_dim: int = 4
@@ -72,7 +72,7 @@ class Config:
 
     @property
     def internal_state_dim(self) -> int:
-        return 4
+        return 7
 
     @property
     def memory_summary_dim(self) -> int:
