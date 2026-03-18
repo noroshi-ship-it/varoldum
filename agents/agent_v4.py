@@ -864,7 +864,7 @@ class Agent:
             outcome_good = energy_gained > 0 or effective_damage < 0.01
             for tid in self._heard_tokens.tokens:
                 self.discrete_vocab.ground_listener(
-                    int(tid), concepts, outcome_good, lr=self.learning_rate * 0.5)
+                    int(tid), concepts, outcome_good, lr=self.learning_rate * 2.0)
             # Phase 7: Grammar listener grounding
             if hasattr(self._heard_tokens, 'roles'):
                 for slot_idx in range(min(len(self._heard_tokens.roles), self.grammar.n_slots)):

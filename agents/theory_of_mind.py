@@ -15,9 +15,11 @@ class TrackedAgent:
         'agent_id', 'obs_buffer', 'obs_idx', 'obs_count',
         'predicted_concepts', 'accuracy', 'priority',
         'interaction_count', 'last_seen_tick',
+        'predicted_action', 'has_prediction',
     ]
 
-    def __init__(self, agent_id: int, tom_window: int, bottleneck_size: int):
+    def __init__(self, agent_id: int, tom_window: int, bottleneck_size: int,
+                 action_dim: int = 6):
         self.agent_id = agent_id
         self.obs_buffer = np.zeros((tom_window, OBS_DIM), dtype=np.float32)
         self.obs_idx = 0
@@ -27,6 +29,8 @@ class TrackedAgent:
         self.priority = 0.0
         self.interaction_count = 0
         self.last_seen_tick = 0
+        self.predicted_action = np.zeros(action_dim, dtype=np.float32)
+        self.has_prediction = False
 
     def record_observation(self, obs: np.ndarray, tick: int):
         n = min(len(obs), OBS_DIM)
@@ -60,7 +64,7 @@ class TheoryOfMindSystem:
     __slots__ = [
         'bottleneck_size', 'tom_max_tracked', 'tom_window', 'tom_lr',
         'tom_weight', 'action_dim',
-        '_tracked', '_hidden_layer', '_output_layer',
+        '_tracked', '_hidden_layer', '_output_layer', '_action_layer',
         '_cumulative_accuracy', '_update_count',
     ]
 
@@ -77,11 +81,13 @@ class TheoryOfMindSystem:
         # Tracked agents dict: agent_id → TrackedAgent
         self._tracked: dict[int, TrackedAgent] = {}
 
-        # Shared MLP: flattened obs history → predicted concepts
+        # Shared MLP: flattened obs history → predicted concepts / predicted action
         input_dim = self.tom_window * OBS_DIM
         hidden_size = max(16, min(32, bottleneck_size * 2))
         self._hidden_layer = DenseLayer(input_dim, hidden_size, "tanh")
         self._output_layer = DenseLayer(hidden_size, bottleneck_size, "tanh")
+        # Action prediction head: hidden → predicted next action (tanh)
+        self._action_layer = DenseLayer(hidden_size, action_dim, "tanh")
 
         self._cumulative_accuracy = 0.0
         self._update_count = 0
@@ -89,7 +95,12 @@ class TheoryOfMindSystem:
     def observe_other(self, other_id: int, rel_pos: np.ndarray,
                       action: np.ndarray, signal_strength: float,
                       utterance_decoded: np.ndarray, tick: int):
-        """Record an observation of another agent's behavior."""
+        """Record an observation of another agent's behavior.
+
+        Before recording, runs the MLP on existing history to predict this
+        agent's action, so that verify_prediction() can later compare the
+        prediction against the real action.
+        """
         # Build observation vector
         obs = np.zeros(OBS_DIM, dtype=np.float32)
         obs[0:2] = rel_pos[:2] if len(rel_pos) >= 2 else 0.0
@@ -100,10 +111,18 @@ class TheoryOfMindSystem:
         obs[9:9 + n_utt] = utterance_decoded[:n_utt]
 
         if other_id in self._tracked:
-            self._tracked[other_id].record_observation(obs, tick)
+            ta = self._tracked[other_id]
+            # Predict action BEFORE recording the new observation
+            if ta.obs_count >= 2:
+                flat = ta.get_flat_observations()
+                hidden = self._hidden_layer.forward(flat)
+                ta.predicted_action = self._action_layer.forward(hidden).copy()
+                ta.has_prediction = True
+            ta.record_observation(obs, tick)
         elif len(self._tracked) < self.tom_max_tracked:
             # New slot available
-            ta = TrackedAgent(other_id, self.tom_window, self.bottleneck_size)
+            ta = TrackedAgent(other_id, self.tom_window, self.bottleneck_size,
+                              self.action_dim)
             ta.record_observation(obs, tick)
             self._tracked[other_id] = ta
         else:
@@ -111,7 +130,8 @@ class TheoryOfMindSystem:
             worst_id = min(self._tracked, key=lambda k: self._tracked[k].priority)
             if self._tracked[worst_id].priority < 0.1:
                 del self._tracked[worst_id]
-                ta = TrackedAgent(other_id, self.tom_window, self.bottleneck_size)
+                ta = TrackedAgent(other_id, self.tom_window, self.bottleneck_size,
+                                  self.action_dim)
                 ta.record_observation(obs, tick)
                 self._tracked[other_id] = ta
 
@@ -131,94 +151,83 @@ class TheoryOfMindSystem:
         return predicted
 
     def verify_prediction(self, other_id: int, observed_action: np.ndarray) -> float:
-        """Verify ToM prediction by checking if predicted concepts are consistent
-        with the observed action. Returns accuracy in [0, 1]."""
+        """Verify ToM prediction against the other agent's actual action.
+
+        Compares the previously predicted action (made during observe_other)
+        with the now-observed action. Returns accuracy in [0, 1] where 1 is
+        a perfect prediction.
+        """
         if other_id not in self._tracked:
             return 0.0
 
         ta = self._tracked[other_id]
-        if ta.obs_count < 3:
+        if not ta.has_prediction:
             return 0.0
 
-        # Simple verification: did the predicted concepts change in a way
-        # consistent with the observed action direction?
-        # Use cosine similarity between predicted concept-change and action
-        prev_obs = ta.obs_buffer[(ta.obs_idx - 2) % len(ta.obs_buffer)]
-        prev_action = prev_obs[2:8]
-        predicted = ta.predicted_concepts
+        # Truncate observed action to match action_dim
+        actual = np.zeros(self.action_dim, dtype=np.float32)
+        n = min(len(observed_action), self.action_dim)
+        actual[:n] = observed_action[:n]
 
-        # The prediction is "good" if the agent's action is consistent
-        # with what we'd expect from someone in that concept state
-        # Simple heuristic: correlation between action magnitude and concept magnitude
-        act_energy = float(np.sum(observed_action[:min(6, len(observed_action))] ** 2))
-        concept_energy = float(np.sum(predicted ** 2))
+        # MSE between predicted and actual action
+        error_vec = ta.predicted_action - actual
+        mse = float(np.mean(error_vec ** 2))
 
-        # Both should be correlated (active agent = active concepts)
-        if act_energy < 1e-8 and concept_energy < 1e-8:
-            accuracy = 0.5
-        else:
-            # Normalized correlation
-            accuracy = max(0.0, min(1.0,
-                0.5 + 0.5 * (1.0 - abs(act_energy - concept_energy) /
-                              max(act_energy, concept_energy, 0.01))
-            ))
+        # Convert MSE to accuracy in [0, 1]. With tanh outputs and actions
+        # roughly in [-1, 1], max MSE ~4. Use exp(-mse) for smooth mapping.
+        accuracy = float(np.exp(-mse))
 
         ta.accuracy = ta.accuracy * 0.9 + accuracy * 0.1
 
-        # Online learning: update network to better predict
-        self._learn_from_verification(ta, accuracy)
+        # Backprop prediction error to improve the action prediction head
+        # and shared hidden layer
+        self._learn_from_verification(ta, error_vec, accuracy)
 
+        ta.has_prediction = False
         return accuracy
 
-    def _learn_from_verification(self, ta: TrackedAgent, accuracy: float):
-        """Update ToM network based on prediction quality."""
+    def _learn_from_verification(self, ta: TrackedAgent,
+                                 error_vec: np.ndarray, accuracy: float):
+        """Backprop action prediction error through action head and hidden layer."""
         self._update_count += 1
         alpha = min(0.01, 1.0 / self._update_count)
         self._cumulative_accuracy = (1 - alpha) * self._cumulative_accuracy + alpha * accuracy
 
-        if accuracy > 0.7:
-            return  # Good prediction, no update needed
+        if accuracy > 0.9:
+            return  # Already a good prediction, skip update
 
-        # The prediction was bad — nudge toward observed pattern
+        # Re-run forward pass to get hidden activations (needed for backprop)
         flat = ta.get_flat_observations()
         hidden = self._hidden_layer.forward(flat)
 
-        # Target: use last observed action as a rough concept proxy
-        # (Not perfect, but provides gradient signal)
-        last_obs = ta.obs_buffer[(ta.obs_idx - 1) % len(ta.obs_buffer)]
-        target = np.zeros(self.bottleneck_size, dtype=np.float32)
-        # Fill from action + signal as proxy for concept state
-        n = min(6, self.bottleneck_size)
-        target[:n] = last_obs[2:2 + n]  # action as concept proxy
-        if self.bottleneck_size > 6:
-            target[6:min(10, self.bottleneck_size)] = last_obs[9:9 + min(4, self.bottleneck_size - 6)]
-
-        error = ta.predicted_concepts - target
         lr = self.tom_lr
 
-        # Backprop output
-        d_out = 2.0 * error / max(1, len(error))
-        # tanh derivative
-        d_out = d_out * (1.0 - ta.predicted_concepts ** 2)
+        # --- Backprop through action head ---
+        # d_loss/d_output = 2 * error / action_dim  (MSE gradient)
+        d_act_out = 2.0 * error_vec / max(1, len(error_vec))
+        # tanh derivative at action output
+        d_act_out = d_act_out * (1.0 - ta.predicted_action ** 2)
 
-        grad_W_out = np.outer(hidden, d_out)
-        grad_b_out = d_out
+        grad_W_act = np.outer(hidden, d_act_out)
+        grad_b_act = d_act_out
 
-        # Backprop hidden
-        d_hidden = d_out @ self._output_layer.W.T
+        # --- Backprop through shared hidden layer (from action head only) ---
+        d_hidden = d_act_out @ self._action_layer.W.T
         tanh_deriv = 1.0 - hidden ** 2
         d_hidden = d_hidden * tanh_deriv
 
         grad_W_hid = np.outer(flat, d_hidden)
         grad_b_hid = d_hidden
 
-        np.clip(grad_W_out, -1.0, 1.0, out=grad_W_out)
-        np.clip(grad_b_out, -1.0, 1.0, out=grad_b_out)
+        # Gradient clipping
+        np.clip(grad_W_act, -1.0, 1.0, out=grad_W_act)
+        np.clip(grad_b_act, -1.0, 1.0, out=grad_b_act)
         np.clip(grad_W_hid, -1.0, 1.0, out=grad_W_hid)
         np.clip(grad_b_hid, -1.0, 1.0, out=grad_b_hid)
 
-        self._output_layer.W -= lr * grad_W_out
-        self._output_layer.b -= lr * grad_b_out
+        # Apply updates
+        self._action_layer.W -= lr * grad_W_act
+        self._action_layer.b -= lr * grad_b_act
         self._hidden_layer.W -= lr * grad_W_hid
         self._hidden_layer.b -= lr * grad_b_hid
 
@@ -263,7 +272,8 @@ class TheoryOfMindSystem:
     @property
     def param_count(self) -> int:
         return (self._hidden_layer.W.size + self._hidden_layer.b.size +
-                self._output_layer.W.size + self._output_layer.b.size)
+                self._output_layer.W.size + self._output_layer.b.size +
+                self._action_layer.W.size + self._action_layer.b.size)
 
     @property
     def cumulative_accuracy(self) -> float:

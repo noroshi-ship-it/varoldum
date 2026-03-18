@@ -33,7 +33,9 @@ class DiscreteVocab:
         self._bottleneck_size = bottleneck_size
 
         # Token meaning vectors — each token maps to a point in concept space
-        self.token_meanings = np.random.randn(MAX_VOCAB, bottleneck_size).astype(np.float32) * 0.3
+        # Deterministic seed so ALL agents start with the SAME codebook
+        seed_rng = np.random.default_rng(12345)
+        self.token_meanings = seed_rng.standard_normal((MAX_VOCAB, bottleneck_size)).astype(np.float32) * 0.3
         # Normalize
         norms = np.linalg.norm(self.token_meanings, axis=1, keepdims=True)
         self.token_meanings /= np.maximum(norms, 1e-8)

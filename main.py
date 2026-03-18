@@ -310,9 +310,10 @@ def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng, ec
                     data["medicine"] = heal
 
             # CONTEXT: enough energy → build structure
-            # manipulate intensity as probability (physics: effort → chance)
+            # deterministic gate: agent must intend to build (manipulate > 0.5)
+            # and have sufficient world-model accuracy (wm >= 0.3)
             wm_build = getattr(agent.brain, 'cumulative_wm_accuracy', 0.0)
-            if wm_build >= 0.3 and evo_rng.random() < manipulate * 0.05:
+            if manipulate > 0.5 and wm_build >= 0.3:
                 # Structure type from movement pattern (emergent)
                 pattern = action["move_dx"] + action["move_dy"] * 2
                 stype = int(abs(pattern * 3) % 6) + 1
@@ -606,7 +607,7 @@ def main():
         if tick % 4 == 0:
             temp_factor = np.maximum(0.1, 1.0 - 2.0 * np.abs(physics.temperature - 0.55))
             rgm = np.clip(temp_factor * physics.fertility, 0.1, 2.0)
-            grid.cells[:, :, 0] += 0.002 * rgm * (1.0 - grid.cells[:, :, 0])
+            grid.cells[:, :, 0] += 0.004 * rgm * (1.0 - grid.cells[:, :, 0])
             np.clip(grid.cells[:, :, 0], 0, 1, out=grid.cells[:, :, 0])
 
         ecology.update(tick, physics.temperature, physics.terrain.water, env.light_level,
@@ -860,7 +861,7 @@ def main():
                     sc_proj[:sc_n] = speaker_concepts[:sc_n]
                     for tid in agent._heard_tokens.tokens:
                         agent.discrete_vocab.ground_listener(
-                            int(tid), sc_proj, True, lr=grounding_lr * 0.3)
+                            int(tid), sc_proj, True, lr=grounding_lr * 1.5)
                     listener_decoded = agent.discrete_vocab.decode_utterance(
                         agent._heard_tokens.tokens)
                     if listener_decoded is not None and hasattr(speaker, 'discrete_vocab'):
@@ -871,7 +872,7 @@ def main():
                         ld_proj[:ld_n] = listener_decoded[:ld_n]
                         for tid in agent._heard_tokens.tokens:
                             speaker.discrete_vocab.ground_speaker(
-                                int(tid), ld_proj, lr=grounding_lr * 0.2)
+                                int(tid), ld_proj, lr=grounding_lr * 1.0)
 
         # Disaster communication reward: sharing warnings saves lives
         # Agents who hear tokens in disaster zones get survival bonus,

@@ -307,7 +307,7 @@ class BottleneckBrain:
         self.world_prediction_error = float(np.mean(error ** 2))
 
         self._wm_update_count += 1
-        alpha = min(0.01, 1.0 / self._wm_update_count)
+        alpha = 0.05 / (1.0 + 0.01 * self._wm_update_count)
         self.cumulative_wm_accuracy = (
             (1 - alpha) * self.cumulative_wm_accuracy
             + alpha * (1.0 - min(1.0, self.world_prediction_error))

@@ -6,8 +6,8 @@ from dataclasses import dataclass
 class Config:
     world_width: int = 192
     world_height: int = 192
-    resource_growth_rate: float = 0.025
-    resource_diffusion: float = 0.008
+    resource_growth_rate: float = 0.06
+    resource_diffusion: float = 0.015
     hazard_spread_rate: float = 0.008
     hazard_decay_rate: float = 0.008
     season_period: int = 1000
@@ -15,7 +15,7 @@ class Config:
 
     initial_population: int = 200
     max_population: int = 2000
-    base_metabolic_rate: float = 0.003
+    base_metabolic_rate: float = 0.002
     brain_metabolic_cost: float = 0.000001
     stm_capacity: int = 8
     ltm_capacity: int = 32

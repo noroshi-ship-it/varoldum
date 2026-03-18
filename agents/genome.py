@@ -148,7 +148,7 @@ PHASE16_LOCI = {
     "kv_memory_capacity": (PHASE16_OFFSET + 0, 0.0, 32.0),
     "kv_read_strength":   (PHASE16_OFFSET + 1, 0.1, 2.0),
     "kv_write_strength":  (PHASE16_OFFSET + 2, 0.1, 1.0),
-    "grounding_lr":       (PHASE16_OFFSET + 3, 0.001, 0.05),
+    "grounding_lr":       (PHASE16_OFFSET + 3, 0.01, 0.1),
 }
 
 FIXED_GENE_COUNT = NUM_TRAIT_GENES + ARCH_COUNT + MORPH_COUNT + CONCEPT_COUNT + ABSTRACT_COUNT + SOCIETY_COUNT + META_COUNT + COGNITIVE_COUNT + EMERGENCE_COUNT + PHASE16_COUNT
@@ -244,7 +244,7 @@ def random_genome(cfg: Config, max_nn_params: int, rng: np.random.Generator) -> 
     genes[PHASE16_OFFSET + 0] = rng.uniform(2.0, 8.0)         # kv_memory_capacity (start moderate)
     genes[PHASE16_OFFSET + 1] = rng.uniform(0.3, 1.0)         # kv_read_strength
     genes[PHASE16_OFFSET + 2] = rng.uniform(0.2, 0.6)         # kv_write_strength
-    genes[PHASE16_OFFSET + 3] = rng.uniform(0.005, 0.02)      # grounding_lr
+    genes[PHASE16_OFFSET + 3] = rng.uniform(0.02, 0.06)       # grounding_lr
 
     nn_start = FIXED_GENE_COUNT
     genes[nn_start:] = rng.standard_normal(max_nn_params) * 0.3
