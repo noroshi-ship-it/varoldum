@@ -3,7 +3,7 @@ import numpy as np
 from agents.discrete_language import TokenUtterance, DiscreteVocab, MAX_VOCAB
 
 
-MAX_GRAMMAR_SLOTS = 5
+MAX_GRAMMAR_SLOTS = 10
 
 
 class StructuredUtterance(TokenUtterance):

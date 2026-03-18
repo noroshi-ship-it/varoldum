@@ -513,6 +513,15 @@ def main():
         for agent in agents:
             nearby = count_nearby(agent, agents, radius=4)
             agent._nearby_agent_count = nearby  # Phase 5A: feed social emotions
+            # Phase 13: Group identity — compute in-group ratio
+            if nearby > 0 and hasattr(agent, '_group_identity_weight'):
+                nearby_others = _spatial.query(agent.x, agent.y, 4)
+                same_lineage = sum(1 for o in nearby_others
+                                   if o.id != agent.id and o.is_alive
+                                   and o.lineage_id == agent.lineage_id)
+                agent._nearby_in_group_ratio = same_lineage / max(1, nearby)
+            elif hasattr(agent, '_nearby_in_group_ratio'):
+                agent._nearby_in_group_ratio = 0.0
             heard = language.get_strongest_signal(agent, tick)
             # Phase 3: Pass heard discrete tokens
             heard_tokens = discrete_lang.get_nearest_utterance(
@@ -1084,6 +1093,8 @@ def main():
                         sum(1 for b in a.naming.name_registry.values() if b.entity_type == "abstract")
                         for a in alive]))
                     mean_temporal = float(np.mean([a._temporal_encoding for a in alive]))
+                    mean_group_weight = float(np.mean([a._group_identity_weight for a in alive]))
+                    mean_in_group_ratio = float(np.mean([a._nearby_in_group_ratio for a in alive]))
                     logger.log_dict("language_analysis", tick, {
                         "mean_grammar_weight": mean_gw,
                         "mean_role_differentiation": mean_diff,
@@ -1097,6 +1108,8 @@ def main():
                         "mean_norms": mean_norms,
                         "mean_abstract_names": mean_abstract,
                         "mean_temporal_encoding": mean_temporal,
+                        "mean_group_identity": mean_group_weight,
+                        "mean_in_group_ratio": mean_in_group_ratio,
                         "pop_size": len(alive),
                     })
 

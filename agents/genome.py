@@ -29,7 +29,7 @@ CONCEPT_OFFSET = 28
 CONCEPT_COUNT = 3
 
 CONCEPT_LOCI = {
-    "bottleneck_size":  (CONCEPT_OFFSET + 0, 8.0, 64.0),
+    "bottleneck_size":  (CONCEPT_OFFSET + 0, 8.0, 128.0),
     "think_steps":      (CONCEPT_OFFSET + 1, 0.0, 8.0),
     "world_model_lr":   (CONCEPT_OFFSET + 2, 0.001, 0.05),
 }
@@ -46,8 +46,8 @@ ABSTRACT_LOCI = {
     # Phase 2: Recursive thought
     "depth_gate_threshold":   (ABSTRACT_OFFSET + 3, -0.5, 0.5),
     # Phase 3: Discrete language
-    "vocab_active":           (ABSTRACT_OFFSET + 4, 2.0, 16.0),
-    "utterance_length":       (ABSTRACT_OFFSET + 5, 1.0, 3.0),
+    "vocab_active":           (ABSTRACT_OFFSET + 4, 2.0, 64.0),
+    "utterance_length":       (ABSTRACT_OFFSET + 5, 1.0, 8.0),
     "listen_weight":          (ABSTRACT_OFFSET + 6, 0.0, 1.0),
     # Phase 4: Mortality awareness
     "mortality_sensitivity":  (ABSTRACT_OFFSET + 7, 0.0, 2.0),
@@ -81,7 +81,7 @@ META_LOCI = {
     "meta_bottleneck_size": (META_OFFSET + 1, 2.0, 16.0),
     "meta_wm_lr":           (META_OFFSET + 2, 0.001, 0.05),
     # Phase 7: Compositional grammar
-    "n_grammar_slots":      (META_OFFSET + 3, 2.0, 5.0),
+    "n_grammar_slots":      (META_OFFSET + 3, 2.0, 10.0),
     "grammar_lr":           (META_OFFSET + 4, 0.001, 0.05),
     "grammar_weight":       (META_OFFSET + 5, 0.0, 1.0),
     # Phase 8: Theory of Mind
@@ -120,7 +120,7 @@ COGNITIVE_LOCI = {
 
 # Emergence infrastructure genes (Phase 13)
 EMERGENCE_OFFSET = COGNITIVE_OFFSET + COGNITIVE_COUNT  # 73
-EMERGENCE_COUNT = 10
+EMERGENCE_COUNT = 12
 
 EMERGENCE_LOCI = {
     "workspace_slots":       (EMERGENCE_OFFSET + 0, 0.0, 6.0),
@@ -133,6 +133,9 @@ EMERGENCE_LOCI = {
     "composition_depth":     (EMERGENCE_OFFSET + 7, 0.0, 3.0),
     "counterfactual_weight": (EMERGENCE_OFFSET + 8, 0.0, 1.0),
     "norm_inheritance":      (EMERGENCE_OFFSET + 9, 0.0, 1.0),
+    # Group identity
+    "group_identity_weight": (EMERGENCE_OFFSET + 10, 0.0, 1.0),
+    "in_group_cooperation":  (EMERGENCE_OFFSET + 11, 0.0, 2.0),
 }
 
 FIXED_GENE_COUNT = NUM_TRAIT_GENES + ARCH_COUNT + MORPH_COUNT + CONCEPT_COUNT + ABSTRACT_COUNT + SOCIETY_COUNT + META_COUNT + COGNITIVE_COUNT + EMERGENCE_COUNT
@@ -163,8 +166,8 @@ def random_genome(cfg: Config, max_nn_params: int, rng: np.random.Generator) -> 
     genes[ABSTRACT_OFFSET + 1] = rng.uniform(1.0, 3.0)     # n_symbol_slots
     genes[ABSTRACT_OFFSET + 2] = rng.uniform(0.005, 0.02)  # symbol_lr
     genes[ABSTRACT_OFFSET + 3] = rng.uniform(-0.1, 0.1)    # depth_gate_threshold
-    genes[ABSTRACT_OFFSET + 4] = rng.uniform(4.0, 10.0)    # vocab_active
-    genes[ABSTRACT_OFFSET + 5] = rng.uniform(1.0, 2.0)     # utterance_length
+    genes[ABSTRACT_OFFSET + 4] = rng.uniform(6.0, 20.0)    # vocab_active (higher start)
+    genes[ABSTRACT_OFFSET + 5] = rng.uniform(1.0, 3.0)     # utterance_length (higher start)
     genes[ABSTRACT_OFFSET + 6] = rng.uniform(0.2, 0.6)     # listen_weight
     genes[ABSTRACT_OFFSET + 7] = rng.uniform(0.5, 1.5)     # mortality_sensitivity
 
@@ -219,6 +222,8 @@ def random_genome(cfg: Config, max_nn_params: int, rng: np.random.Generator) -> 
     genes[EMERGENCE_OFFSET + 7] = rng.uniform(0.0, 0.5)        # composition_depth (start low)
     genes[EMERGENCE_OFFSET + 8] = rng.uniform(0.0, 0.2)        # counterfactual_weight (start weak)
     genes[EMERGENCE_OFFSET + 9] = rng.uniform(0.0, 0.3)        # norm_inheritance (start low)
+    genes[EMERGENCE_OFFSET + 10] = rng.uniform(0.0, 0.3)       # group_identity_weight (start low)
+    genes[EMERGENCE_OFFSET + 11] = rng.uniform(0.0, 0.5)       # in_group_cooperation (start low)
 
     nn_start = FIXED_GENE_COUNT
     genes[nn_start:] = rng.standard_normal(max_nn_params) * 0.3

@@ -101,6 +101,7 @@ class Config:
             + 6   # workspace context (Phase 13)
             + 4   # norm context (Phase 13)
             + 2   # temporal context (Phase 13)
+            + 3   # group identity context (Phase 13)
         )
 
     @property

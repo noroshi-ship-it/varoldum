@@ -1,8 +1,8 @@
 
 import numpy as np
 
-MAX_VOCAB = 16
-MAX_UTTERANCE_LEN = 3
+MAX_VOCAB = 64
+MAX_UTTERANCE_LEN = 8
 
 
 class TokenUtterance:

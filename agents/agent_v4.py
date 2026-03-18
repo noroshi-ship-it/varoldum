@@ -211,6 +211,10 @@ class Agent:
         self.naming.abstract_capacity = int(round(get_trait(genome, "abstract_naming")))
         self._temporal_encoding = get_trait(genome, "temporal_encoding")
         self.grammar.temporal_encoding = self._temporal_encoding
+        # Group identity
+        self._group_identity_weight = get_trait(genome, "group_identity_weight")
+        self._in_group_cooperation = get_trait(genome, "in_group_cooperation")
+        self._nearby_in_group_ratio = 0.0  # updated each tick from main loop
 
         # Phase 5: Society engine
         inv_capacity = int(round(get_trait(genome, "inventory_capacity")))
@@ -458,6 +462,11 @@ class Agent:
             workspace_vec, # 6 dims: workspace context (Phase 13)
             norm_vec,      # 4 dims: norm context (Phase 13)
             temporal_vec,  # 2 dims: temporal context (Phase 13)
+            np.array([     # 3 dims: group identity context (Phase 13)
+                self._nearby_in_group_ratio,
+                self._group_identity_weight,
+                self._in_group_cooperation,
+            ], dtype=np.float64),
         ])
         return self._context
 

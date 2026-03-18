@@ -4,7 +4,7 @@ from neural.layers import DenseLayer, GRULayer
 
 
 MIN_BOTTLENECK = 2
-MAX_BOTTLENECK = 32
+MAX_BOTTLENECK = 128
 
 
 def decode_bottleneck_architecture(arch_genes: np.ndarray, concept_genes: np.ndarray) -> dict:
