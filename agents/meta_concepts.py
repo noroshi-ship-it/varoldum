@@ -94,7 +94,7 @@ class MetaConceptSystem:
         self._last_predicted = predicted
         return predicted
 
-    def learn_meta_wm(self, actual_meta: np.ndarray):
+    def learn_meta_wm(self, actual_meta: np.ndarray, action: np.ndarray = None):
         """Train meta world model on prediction error (online backprop)."""
         if self._update_count == 0:
             self._last_predicted = actual_meta.copy()
@@ -113,9 +113,12 @@ class MetaConceptSystem:
 
         lr = self.meta_wm_lr
 
-        # Backprop through output layer
-        wm_input = np.concatenate([self._prev_meta,
-                                    np.zeros(self.action_dim, dtype=np.float32)])
+        # Backprop through output layer — use actual action if provided
+        act = np.zeros(self.action_dim, dtype=np.float32)
+        if action is not None:
+            n = min(len(action), self.action_dim)
+            act[:n] = action[:n]
+        wm_input = np.concatenate([self._prev_meta, act])
         hidden_out = self._wm_hidden.forward(wm_input)
 
         d_out = 2.0 * error / max(1, len(error))

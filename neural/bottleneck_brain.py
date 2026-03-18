@@ -68,6 +68,7 @@ class BottleneckBrain:
         self._last_hidden = np.zeros(self.gru_size)
         self._last_value = 0.0
         self._last_bottleneck = np.zeros(self.bottleneck_size)
+        self._prev_bottleneck = np.zeros(self.bottleneck_size)
         self._last_action = np.zeros(action_dim)
         self._last_wm_prediction = np.zeros(self.bottleneck_size)
         self.world_prediction_error = 0.0
@@ -76,6 +77,7 @@ class BottleneckBrain:
         self._pre_encoded = False
         self._thought_depth = 0
         self._thought_value_delta = 0.0
+        self._last_context = None
 
         # Daydream / inspiration system
         self._concept_history = np.zeros((16, self.bottleneck_size), dtype=np.float32)
@@ -103,6 +105,9 @@ class BottleneckBrain:
         return self._last_bottleneck.copy()
 
     def forward(self, raw_input: np.ndarray, context: np.ndarray) -> tuple[np.ndarray, float]:
+        # Save previous bottleneck before encoding overwrites it
+        self._prev_bottleneck = self._last_bottleneck.copy()
+
         if self._pre_encoded:
             concepts = self._last_bottleneck
             self._pre_encoded = False
@@ -112,6 +117,7 @@ class BottleneckBrain:
         ctx = np.zeros(self.context_dim)
         n = min(len(context), self.context_dim)
         ctx[:n] = context[:n]
+        self._last_context = ctx.copy()
 
         policy_input = np.concatenate([concepts, ctx])
         gru_out = self.gru.forward(policy_input)
@@ -153,9 +159,8 @@ class BottleneckBrain:
 
         # Evaluate: is this imagined state valuable?
         saved_h = self.gru.h.copy()
-        ctx_dim = self.context_dim
-        fake_ctx = np.zeros(ctx_dim)
-        gru_input = np.concatenate([imagined_deep, fake_ctx])
+        dream_ctx = self._last_context if self._last_context is not None else np.zeros(self.context_dim)
+        gru_input = np.concatenate([imagined_deep, dream_ctx])
         gru_out = self.gru.forward(gru_input)
         dream_value = float(self.value_layer.forward(gru_out)[0])
         self.gru.h = saved_h  # restore — daydream is sandbox
@@ -216,6 +221,23 @@ class BottleneckBrain:
         ctx[:n] = context[:n]
         discount = 0.9
 
+        # Compute value gradient w.r.t. action to guide search
+        action_grad = np.zeros(self.action_dim)
+        if self.think_steps > 0:
+            base_value = value
+            eps = 0.1
+            for d in range(self.action_dim):
+                perturbed = actions.copy()
+                perturbed[d] += eps
+                perturbed = np.clip(perturbed, -1, 1)
+                imagined = self.imagine_step(concepts, perturbed)
+                gru_tmp = self.gru.forward(np.concatenate([imagined, ctx]))
+                v_plus = float(self.value_layer.forward(gru_tmp)[0])
+                self.gru.h = saved_hidden.copy()
+                action_grad[d] = (v_plus - base_value) / eps
+            grad_norm = np.linalg.norm(action_grad) + 1e-8
+            action_grad_dir = action_grad / grad_norm
+
         for _branch in range(branch_count):
             # Each branch: roll out a full trajectory
             rollout_concepts = concepts.copy()
@@ -226,7 +248,10 @@ class BottleneckBrain:
 
             for step in range(self.think_steps):
                 noise_scale = 0.3 / (1 + step)
-                candidate = current_actions + np.random.randn(self.action_dim) * noise_scale
+                # Mix gradient direction with exploration noise
+                candidate = current_actions + noise_scale * (
+                    action_grad_dir * 0.5 + np.random.randn(self.action_dim) * 0.5
+                )
                 candidate = np.clip(candidate, -1, 1)
 
                 if step == 0:
@@ -271,7 +296,8 @@ class BottleneckBrain:
 
     def learn_world_model(self, new_bottleneck: np.ndarray):
         if self._wm_update_count == 0 and np.all(self._last_wm_prediction == 0):
-            wm_input = np.concatenate([self._last_bottleneck, self._last_action])
+            # First call: use previous bottleneck as input to make initial prediction
+            wm_input = np.concatenate([self._prev_bottleneck, self._last_action])
             h = self.wm_hidden_layer.forward(wm_input)
             self._last_wm_prediction = self.wm_output_layer.forward(h)
             self._wm_update_count += 1
@@ -312,7 +338,8 @@ class BottleneckBrain:
             hid_params -= lr * 0.5 * hid_grad
             hid_layer.set_params(hid_params)
 
-        wm_input = np.concatenate([new_bottleneck, self._last_action])
+        # Predict next state from PREVIOUS bottleneck + action (temporal offset fix)
+        wm_input = np.concatenate([self._prev_bottleneck, self._last_action])
         h = self.wm_hidden_layer.forward(wm_input)
         self._last_wm_prediction = self.wm_output_layer.forward(h)
 

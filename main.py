@@ -31,6 +31,7 @@ from analytics.hall_of_fame import HallOfFame
 from utils.geometry import toroidal_distance
 from checkpoint import save_checkpoint, load_checkpoint, get_latest_checkpoint
 from neural.gpu_batch import batch_encode, batch_think, get_device
+from world.spacetime import LocalTimeField, CausalEventSystem
 
 
 def parse_args():
@@ -117,7 +118,7 @@ def count_nearby(agent, agents, radius=4):
     return count
 
 
-def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng, ecology=None, tick=0, disasters=None):
+def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng, ecology=None, tick=0, disasters=None, light_level=1.0):
     """
     Context-based physics resolution.
     6 generic force channels — physics determines meaning from context.
@@ -167,6 +168,14 @@ def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng, ec
 
         x, y = agent.x, agent.y
         data["temperature"] = physics.get_temperature(x, y)
+
+        # Fix 8: Slope increases movement energy cost
+        slope = physics.terrain.get_slope(x, y)
+        agent.body.energy -= slope * 0.002 * (abs(new_dx) + abs(new_dy))
+
+        # Fix 9: Darkness energy penalty (stumbling in low light)
+        if light_level < 0.3:
+            agent.body.energy -= 0.001 * (0.3 - light_level)
 
         # Nest bonus (physics: shelter provides warmth)
         if structures.get_nest_bonus(x, y):
@@ -228,11 +237,41 @@ def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng, ec
             # Phase 15: Sigmoid cognitive gate — sharp threshold at wm≈0.35
             intel_bonus = 0.15 + 1.35 / (1.0 + math.exp(-8.0 * (wm_acc - 0.35)))
             consumed = raw_consumed * intel_bonus
-            agent.body.eat(consumed)
+            # Substance-specific eating: consume actual substances from chemistry
+            if physics is not None and consumed > 0:
+                top_ids, top_concs = physics.chemistry.get_top_substances(x, y, n=3)
+                total_conc = float(np.sum(top_concs))
+                eaten_any = False
+                for si in range(len(top_ids)):
+                    if top_concs[si] < 0.005:
+                        continue
+                    sid = int(top_ids[si])
+                    # Proportion of this substance at cell
+                    frac = float(top_concs[si]) / max(0.01, total_conc)
+                    sub_amount = consumed * frac
+                    # Actually remove from chemistry grid
+                    actually_eaten = physics.chemistry.consume_substance(
+                        x, y, sid, sub_amount)
+                    if actually_eaten > 0:
+                        agent.body.eat_substance(sid, actually_eaten)
+                        # Toxicity damage
+                        tox = physics.chemistry.get_toxicity(sid)
+                        if tox > 0.2:
+                            dmg = actually_eaten * tox * 0.5
+                            agent.body.take_damage(dmg)
+                            data["damage"] += dmg
+                        eaten_any = True
+                if not eaten_any:
+                    agent.body.eat(consumed)  # fallback: no substances available
+            else:
+                agent.body.eat(consumed)
             data["energy_gained"] = consumed
 
             # Mineral absorption (same mouth force, different material)
             mineral_available = physics.consume_mineral(x, y, absorb * 0.2)
+            # Fix 7: Magnetosense gives +10% mineral collection (magnetic anomalies near deposits)
+            if agent.morphology.magnetosense.active:
+                mineral_available *= 1.1
             collected = agent.body.collect_mineral(mineral_available)
             data["mineral"] = collected
 
@@ -283,6 +322,15 @@ def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng, ec
                         agent.body.energy -= cost
                         data["structure_built"] = True
 
+        elif manipulate < -0.3:
+            # Fix 4: Negative manipulate = deconstruct nearby structure
+            s_at = structures.get_at(x, y)
+            if s_at is not None:
+                # Recover a fraction of resources from deconstructing
+                recovered = BUILD_COST.get(s_at.stype, 0.15) * 0.3
+                agent.body.energy += recovered + s_at.stored_resource
+                structures.destroy(x, y)
+
         # === SIGNAL: broadcast (a[5]) ===
         signal = action.get("signal", 0)
         if signal > 0:
@@ -320,6 +368,18 @@ def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng, ec
                     for ai in range(1, 5):
                         if evo_rng.random() < danger:
                             child.genome[ARCH_OFFSET + ai] += evo_rng.normal(0, danger * 30)
+                # Fix 2: Radiation-zone mutagenesis — high radiation increases mutation
+                mut_mod = physics.hidden.get_mutation_modifier(agent.x, agent.y)
+                if mut_mod > 1.5:
+                    from agents.genome import LOCI as _LOCI
+                    _mr_idx = _LOCI["mutation_rate"][0]
+                    extra_mut = (mut_mod - 1.0) * 0.3
+                    child.genome[_mr_idx] += extra_mut
+                    # Extra random gene perturbations from radiation
+                    n_extra = int(mut_mod)
+                    for _ in range(n_extra):
+                        gi = evo_rng.integers(0, len(child.genome))
+                        child.genome[gi] += evo_rng.normal(0, extra_mut * 10)
                 new_agents.append(child)
 
         # === PARENTAL CARE: physics — proximity + youth ===
@@ -350,7 +410,8 @@ def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng, ec
             agent.body.take_damage(trap_dmg)
 
         toxin = physics.get_toxin(x, y)
-        toxin_dmg = toxin * 0.05
+        # Fix 5: Morphology toxin_resistance reduces toxin damage
+        toxin_dmg = toxin * 0.05 * (1.0 - agent.morphology.toxin_resistance)
         agent.body.take_damage(toxin_dmg)
         if ecology is not None:
             pred_danger = ecology.get_predator_danger(x, y)
@@ -485,6 +546,13 @@ def main():
     discrete_lang = DiscreteLanguageSystem(cfg.world_width, cfg.world_height, cfg.hear_radius)
     lineage_memory = LineageMemorySystem(max_rules_per_lineage=8)
 
+    # Wire substance properties into Agent/Body for compositional universe
+    Agent._substance_props = physics.chemistry.substance_props
+
+    # Spacetime: local time field + causal event system
+    spacetime_field = LocalTimeField(cfg.world_width, cfg.world_height)
+    causal_events = CausalEventSystem(cfg.world_width, cfg.world_height)
+
     agents: list[Agent] = []
     if args.resume and ckpt:
         for agent_state in ckpt.get("agents", []):
@@ -532,6 +600,12 @@ def main():
         t0 = time.time()
         env.update(tick)
         physics.update(tick, env.season_phase, grid.cells)
+
+        # Fix 1: Apply per-cell resource growth modifier from physics (temperature + fertility)
+        temp_factor = np.maximum(0.1, 1.0 - 2.0 * np.abs(physics.temperature - 0.55))
+        rgm = temp_factor * physics.fertility
+        grid.cells[:, :, 0] *= (0.5 + 0.5 * rgm)
+
         ecology.update(tick, physics.temperature, physics.terrain.water, env.light_level,
                        soil_ph=physics.hidden.soil_ph)
         # Phase 15: Regime shifts — invalidate cached plant knowledge
@@ -541,6 +615,29 @@ def main():
         if tick > 0 and tick % 300 == 0:
             grid.refresh_camouflage(evo_rng)
         structures.update(tick)
+
+        # Spacetime: compute local clock rates from physics, advance field
+        if tick % 4 == 0:
+            substance_density = np.sum(physics.chemistry.substances[:, :, :physics.chemistry.n_substances], axis=2)
+            # Stability field: average stability of substances at each cell
+            stability_weights = physics.chemistry.substance_props[:physics.chemistry.n_substances, 5]
+            conc_sum = np.sum(physics.chemistry.substances[:, :, :physics.chemistry.n_substances], axis=2)
+            weighted_stab = np.sum(
+                physics.chemistry.substances[:, :, :physics.chemistry.n_substances] *
+                stability_weights[np.newaxis, np.newaxis, :], axis=2)
+            stability_field = np.where(conc_sum > 0.01, weighted_stab / conc_sum, 0.5)
+            spacetime_field.compute_clock_rates(substance_density, physics.temperature, stability_field)
+        spacetime_field.advance()
+
+        # Spacetime: update agent clock rates, advance local time, determine who ticks
+        active_set = {}  # agent_id -> update_count (0 = skip, 1+ = active)
+        for agent in agents:
+            agent.spacetime.update_clock_rate(spacetime_field, agent.x, agent.y)
+            agent.spacetime.advance()
+            n_updates = agent.spacetime.should_update()
+            if n_updates > 0:
+                active_set[agent.id] = n_updates
+
         grid.clear_agent_layer()
         for agent in agents:
             grid.stamp_agent(agent.x, agent.y)
@@ -549,6 +646,8 @@ def main():
         t1 = time.time()
 
         for agent in agents:
+            if agent.id not in active_set:
+                continue  # time-dilated: skip this tick
             nearby = count_nearby(agent, agents, radius=4)
             agent._nearby_agent_count = nearby  # Phase 5A: feed social emotions
             # Phase 13-14: Group identity, cooperative benefits
@@ -663,8 +762,13 @@ def main():
             gpu_results = None
 
         actions = []
+        _null_action = {"mouth": 0, "move_dx": 0, "move_dy": 0, "manipulate": 0,
+                        "social": 0, "signal": 0}
         if gpu_results:
             for agent in agents:
+                if agent.id not in active_set:
+                    actions.append(_null_action)
+                    continue
                 r = gpu_results.get(agent.id)
                 if r:
                     agent.apply_gpu_result(r[0], r[1], r[2], r[3])
@@ -673,13 +777,16 @@ def main():
                 actions.append(agent.act())
         else:
             for agent in agents:
+                if agent.id not in active_set:
+                    actions.append(_null_action)
+                    continue
                 agent.think()
                 actions.append(agent.act())
         t3 = time.time()
 
         new_agents, agent_data = resolve_actions(
             grid, physics, structures, agents, actions, cfg, evo_rng, ecology=ecology, tick=tick,
-            disasters=env.disasters
+            disasters=env.disasters, light_level=env.light_level
         )
         t3b = time.time()
         profile_accum["actions"] += t3b - t3
@@ -699,6 +806,9 @@ def main():
                         tok_arr, tick)
         language.cleanup(tick)
         discrete_lang.cleanup(tick)
+        # Spacetime: cleanup expired causal events
+        min_tau = float(np.min(spacetime_field.tau)) if tick > 0 else 0.0
+        causal_events.cleanup(min_tau)
 
         substance_props = physics.chemistry.substance_props if hasattr(physics.chemistry, 'substance_props') else None
         social_rewards, positive_ints, negative_ints = social.resolve_social(
@@ -729,6 +839,11 @@ def main():
                 speaker._pending_social_reward += 0.1
                 agent._pending_positive_interaction += 0.2
                 agent._pending_social_reward += 0.05
+
+                # Phase 7: Grammar role alignment on successful communication
+                if hasattr(agent, 'grammar') and hasattr(speaker, 'grammar'):
+                    agent.grammar.align_roles(speaker.grammar.role_embeddings, lr=0.01)
+                    speaker.grammar.align_roles(agent.grammar.role_embeddings, lr=0.005)
 
                 # Phase 16: Cross-agent symbol grounding
                 # Listener learns speaker's intended meaning, speaker learns what listener understood
@@ -869,6 +984,12 @@ def main():
         for agent in agents:
             if not agent.is_alive:
                 continue
+            # Time-dilated agents: only metabolize (scaled), skip learning
+            if agent.id not in active_set:
+                rate = agent.spacetime.clock_rate
+                agent.body.metabolize(0.0, temp_modifier=rate)
+                agent.body.update_natural_mortality(agent_rng)
+                continue
             data = agent_data.get(agent.id, {})
             eg = data.get("energy_gained", 0)
             dmg = data.get("damage", 0)
@@ -885,6 +1006,11 @@ def main():
             )
             reward += social_rewards.get(agent.id, 0)
 
+            # Fast agents (clock > 1.0) get proportional learning + metabolism
+            time_multiplier = active_set.get(agent.id, 1)
+            saved_lr = agent.learning_rate
+            if time_multiplier > 1:
+                agent.learning_rate *= time_multiplier
             x, y = agent.x, agent.y
             agent.update(reward, energy_gained=eg, damage_taken=dmg,
                         temperature=temp, mineral_found=mineral, toxin_exposure=toxin,
@@ -898,6 +1024,11 @@ def main():
                         medicine_result=medicine,
                         fertility_here=float(physics.fertility[
                             x % physics.w, y % physics.h]))
+            agent.learning_rate = saved_lr
+            # Extra metabolism ticks for fast agents
+            if time_multiplier > 1:
+                for _ in range(time_multiplier - 1):
+                    agent.body.metabolize(0.0, temp_modifier=agent.spacetime.clock_rate)
         t4 = time.time()
 
         profile_accum["world"] += t1 - t0
@@ -910,6 +1041,8 @@ def main():
         for a in dead:
             hall_of_fame.check_dead_agent(a, tick)
             ecology.add_dead_matter(a.x, a.y, amount=0.15)
+            # Body decomposes: substances return to the world
+            physics.chemistry.deposit_composition(a.x, a.y, a.body.decompose())
             # Phase 4: Nearby agents observe death through concept similarity
             dead_concepts = a.brain.get_concepts()
             nearby_alive = _spatial.query(a.x, a.y, 6)
@@ -917,6 +1050,8 @@ def main():
                 if observer.id != a.id and observer.is_alive:
                     observer.mortality.observe_nearby_death(
                         observer.brain.get_concepts(), dead_concepts, tick)
+                    observer.mortality.learn_from_survival(
+                        survived=False, learning_rate=observer.learning_rate * 0.5)
                     # Grief: if observer was bonded to the dead agent
                     if hasattr(observer, 'observe_partner_death'):
                         observer.observe_partner_death(a.id)
@@ -1066,6 +1201,10 @@ def main():
                 "signals_sent": lang_stats["signals_sent"],
                 "signals_heard": lang_stats["signals_heard"],
                 **{f"chem_{k}": v for k, v in physics.chemistry.get_stats().items()},
+                "spacetime_mean_clock": float(np.mean(spacetime_field.clock_rate)),
+                "spacetime_min_clock": float(np.min(spacetime_field.clock_rate)),
+                "spacetime_max_clock": float(np.max(spacetime_field.clock_rate)),
+                **{f"causal_{k}": v for k, v in causal_events.stats.items()},
                 **{f"terrain_{k}": v for k, v in physics.terrain.get_stats().items()},
                 **{f"eco_{k}": v for k, v in ecology.get_stats().items()},
                 **{f"hidden_{k}": v for k, v in physics.hidden.get_stats().items()},

@@ -40,20 +40,32 @@ class SelfModel:
             (1 - alpha) * self.cumulative_accuracy + alpha * (1.0 - min(1.0, self.prediction_error))
         )
 
-        params = self.network.get_params()
-        grad = np.zeros_like(params)
         out_layer = self.network.layers[-1]
         if hasattr(out_layer, '_last_input') and out_layer._last_input is not None:
             d_out = 2 * error
-            grad_W = np.outer(out_layer._last_input, d_out).ravel()
-            grad_b = d_out
+            grad_w_out = np.outer(out_layer._last_input, d_out).ravel()
+            grad_b_out = d_out
 
-            n_out_params = out_layer.param_count
             out_params = out_layer.get_params()
-            out_grad = np.concatenate([grad_W, grad_b])
+            out_grad = np.concatenate([grad_w_out, grad_b_out])
             out_grad = np.clip(out_grad, -1.0, 1.0)
             out_params -= learning_rate * out_grad
             out_layer.set_params(out_params)
+
+            # Backpropagate through hidden layer
+            if len(self.network.layers) >= 2:
+                hid_layer = self.network.layers[-2]
+                if hasattr(hid_layer, '_last_input') and hid_layer._last_input is not None:
+                    d_hidden = d_out @ out_layer.W.T
+                    tanh_deriv = 1.0 - out_layer._last_input ** 2
+                    d_hidden = d_hidden * tanh_deriv
+                    grad_w_hid = np.outer(hid_layer._last_input, d_hidden).ravel()
+                    grad_b_hid = d_hidden
+                    hid_params = hid_layer.get_params()
+                    hid_grad = np.concatenate([grad_w_hid, grad_b_hid])
+                    hid_grad = np.clip(hid_grad, -1.0, 1.0)
+                    hid_params -= learning_rate * hid_grad
+                    hid_layer.set_params(hid_params)
 
     @property
     def surprise(self) -> float:

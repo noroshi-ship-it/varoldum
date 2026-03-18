@@ -104,6 +104,8 @@ class Config:
             + 3   # group identity context (Phase 13)
             + 3   # reputation, group safety (Phase 14)
             + 8   # KV memory read (Phase 16)
+            + 4   # spacetime context: clock_rate, cognitive_rate, time_perception, proper_age
+            + 4   # active symbol composite embedding
         )
 
     @property

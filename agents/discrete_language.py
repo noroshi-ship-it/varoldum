@@ -168,14 +168,22 @@ def _is_structured(utterance) -> bool:
 
 
 class DiscreteLanguageSystem:
-    """World-level system that manages token-based communication between agents."""
+    """World-level system that manages token-based communication between agents.
+
+    Messages propagate at finite speed — closer agents hear sooner.
+    This implements causal message latency: m_{j->i} arrives when
+    tick >= emit_tick + distance / propagation_speed.
+    """
+
+    PROPAGATION_SPEED = 4.0  # cells per tick — finite "speed of sound"
 
     def __init__(self, world_width: int, world_height: int, hear_radius: int = 8):
         self.w = world_width
         self.h = world_height
         self.hear_radius = hear_radius
         self._utterances: list[TokenUtterance] = []
-        self._tick_stats = {"tokens_sent": 0, "tokens_heard": 0, "unique_speakers": 0}
+        self._tick_stats = {"tokens_sent": 0, "tokens_heard": 0, "unique_speakers": 0,
+                            "delayed": 0}
 
     def broadcast(self, agent_id: int, agent_pos: np.ndarray, agent_lineage: int,
                   tokens: np.ndarray, tick: int):
@@ -193,14 +201,25 @@ class DiscreteLanguageSystem:
         for u in self._utterances:
             if u.sender_id == agent_id:
                 continue
-            if u.tick < tick - 3:
+            # Max lifetime: hear_radius / propagation_speed + 1 (rounded up)
+            max_age = self.hear_radius / self.PROPAGATION_SPEED + 1
+            if u.tick < tick - max_age:
                 continue
             dx = abs(u.sender_pos[0] - ax)
             dy = abs(u.sender_pos[1] - ay)
             dx = min(dx, self.w - dx)
             dy = min(dy, self.h - dy)
             d = dx + dy
-            if d <= self.hear_radius and d < best_dist:
+            if d > self.hear_radius:
+                continue
+
+            # Causal delay: signal must have had time to travel the distance
+            travel_time = d / self.PROPAGATION_SPEED
+            if tick < u.tick + travel_time:
+                self._tick_stats["delayed"] += 1
+                continue
+
+            if d < best_dist:
                 best_dist = d
                 best = u
         if best is not None:
@@ -208,11 +227,13 @@ class DiscreteLanguageSystem:
         return best
 
     def cleanup(self, tick: int):
-        self._utterances = [u for u in self._utterances if u.tick >= tick - 3]
+        max_age = self.hear_radius / self.PROPAGATION_SPEED + 2
+        self._utterances = [u for u in self._utterances if u.tick >= tick - max_age]
 
     @property
     def recent_stats(self) -> dict:
         stats = self._tick_stats.copy()
         stats["unique_speakers"] = len(set(u.sender_id for u in self._utterances))
-        self._tick_stats = {"tokens_sent": 0, "tokens_heard": 0, "unique_speakers": 0}
+        self._tick_stats = {"tokens_sent": 0, "tokens_heard": 0, "unique_speakers": 0,
+                            "delayed": 0}
         return stats

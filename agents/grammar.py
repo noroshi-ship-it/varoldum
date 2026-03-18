@@ -208,6 +208,20 @@ class GrammarSystem:
         if norm > 1e-8:
             self.role_embeddings[slot_idx] /= norm
 
+    def align_roles(self, other_roles, lr=0.01):
+        """Pull role embeddings toward successful communication partner."""
+        for i in range(min(self.n_slots, len(other_roles))):
+            my_dim = len(self.role_embeddings[i])
+            other_dim = len(other_roles[i])
+            if my_dim != other_dim:
+                continue  # skip if different bottleneck sizes
+            diff = other_roles[i] - self.role_embeddings[i]
+            self.role_embeddings[i] += lr * diff
+            # Re-normalize
+            n = np.linalg.norm(self.role_embeddings[i])
+            if n > 1e-8:
+                self.role_embeddings[i] /= n
+
     @property
     def param_count(self) -> int:
         return self.role_embeddings.size

@@ -29,6 +29,7 @@ from agents.genome import (
 from agents.language import ListenerModel, SIGNAL_DIM
 from neural.bottleneck_brain import BottleneckBrain
 from world.grid import Grid
+from world.spacetime import AgentSpacetime
 
 
 _next_id = 0
@@ -41,6 +42,9 @@ def _gen_id() -> int:
 
 
 class Agent:
+    # Class-level substance properties — set once by main.py before creating agents
+    _substance_props = None
+
     def __init__(self, genome: np.ndarray, cfg: Config, position: np.ndarray,
                  parent_id: int = -1):
         self.id = _gen_id()
@@ -58,7 +62,7 @@ class Agent:
 
         self.morphology = Morphology(get_morph_genes(genome))
 
-        self.body = Body(genome, cfg, position)
+        self.body = Body(genome, cfg, position, substance_props=Agent._substance_props)
 
         self.sensors = RawSensors(genome, cfg)
 
@@ -93,8 +97,18 @@ class Agent:
             self.bottleneck_size, max_hyp=8, action_dim=cfg.action_dim
         )
 
-        self.composable = ComposableRuleSystem(max_rules=6, action_dim=cfg.action_dim)
+        # Phase 13: composition_depth gene controls max composable rule complexity
+        composition_depth = int(round(get_trait(genome, "composition_depth")))
+        self._composition_depth = max(1, composition_depth)
+        self.composable = ComposableRuleSystem(
+            max_rules=6, action_dim=cfg.action_dim,
+            max_complexity=self._composition_depth + 2,
+        )
         self.meta = MetaHypothesisSystem(max_meta_rules=6, max_experiments=2)
+
+        # Phase 13: counterfactual_weight and innovation_drive genes
+        self._counterfactual_weight = get_trait(genome, "counterfactual_weight")
+        self._innovation_drive = get_trait(genome, "innovation_drive")
 
         from agents.hypothesis import HypothesisSystem
         self.hypotheses = HypothesisSystem(max_hypotheses=8, action_dim=cfg.action_dim)
@@ -236,6 +250,9 @@ class Agent:
         # Phase 16: Shared symbol grounding
         self._grounding_lr = get_trait(genome, "grounding_lr")
 
+        # Spacetime: per-agent local time tracking
+        self.spacetime = AgentSpacetime()
+
         # Phase 5: Society engine
         inv_capacity = int(round(get_trait(genome, "inventory_capacity")))
         self.inventory = Inventory(
@@ -283,6 +300,7 @@ class Agent:
         self._hyp_rng = None
         self._feature_vec = None
         self._heard_signal = np.zeros(cfg.signal_dim)
+        self._disaster_warnings = np.zeros(4)
         self._heard_tokens = None  # TokenUtterance or None
         self._last_spoken_tokens = None  # np.ndarray or None
         self._last_structured_utterance = None  # StructuredUtterance or None
@@ -469,7 +487,7 @@ class Agent:
             self.internal.as_vector(),
             mem_summary,
             self_prediction,
-            self._heard_signal,
+            self._heard_signal * (0.3 + 0.7 * self.listener.accuracy),  # weight by listener accuracy
             self._extra_sensor,
             mortality_vec,
             heard_meaning[:min(4, len(heard_meaning))],  # first 4 dims of decoded meaning
@@ -494,6 +512,8 @@ class Agent:
             ], dtype=np.float64),
             self.kv_memory.get_context_vector(  # 8 dims: KV memory read (Phase 16)
                 self.brain.get_concepts(), max_dim=8),
+            self.spacetime.get_context(),  # 4 dims: spacetime context
+            self.symbols.get_composite_embedding()[:min(4, self.bottleneck_size)],  # 4 dims: active symbol context
         ])
         return self._context
 
@@ -521,10 +541,13 @@ class Agent:
         if self._feature_vec is not None:
             comp_bias = self.composable.record_and_evaluate(self._feature_vec)
 
+        hyp_bias = self.hypotheses.get_action_bias(self._feature_vec) if self._feature_vec is not None else np.zeros(len(self._action))
+
         n = len(self._action)
         cb = concept_bias[:n] if len(concept_bias) >= n else np.pad(concept_bias, (0, n - len(concept_bias)))
         cpb = comp_bias[:n] if len(comp_bias) >= n else np.pad(comp_bias, (0, n - len(comp_bias)))
-        self._action = np.tanh(self._action + cb * 0.4 + cpb * 0.3)
+        hb = hyp_bias[:n] if len(hyp_bias) >= n else np.pad(hyp_bias, (0, n - len(hyp_bias)))
+        self._action = np.tanh(self._action + cb * 0.4 + cpb * 0.3 + hb * 0.2)
         return self._action
 
     def think(self):
@@ -554,15 +577,30 @@ class Agent:
         if self._feature_vec is not None:
             comp_bias = self.composable.record_and_evaluate(self._feature_vec)
 
+        hyp_bias = self.hypotheses.get_action_bias(self._feature_vec) if self._feature_vec is not None else np.zeros(len(self._action))
+
         n = len(self._action)
         cb = concept_bias[:n] if len(concept_bias) >= n else np.pad(concept_bias, (0, n - len(concept_bias)))
         cpb = comp_bias[:n] if len(comp_bias) >= n else np.pad(comp_bias, (0, n - len(comp_bias)))
+        hb = hyp_bias[:n] if len(hyp_bias) >= n else np.pad(hyp_bias, (0, n - len(hyp_bias)))
 
         # Phase 12: Goal action bias
         goal_bias = self.goals.get_action_bias(concepts)
         gb = goal_bias[:n] if len(goal_bias) >= n else np.pad(goal_bias, (0, n - len(goal_bias)))
 
-        self._action = np.tanh(self._action + cb * 0.4 + cpb * 0.3 + gb * 0.3)
+        self._action = np.tanh(self._action + cb * 0.4 + cpb * 0.3 + hb * 0.2 + gb * 0.3)
+
+        # Phase 13: Counterfactual exploration — consider the opposite action
+        cfw = self._counterfactual_weight
+        if cfw > 0.1:
+            opposite = -self._action
+            # Evaluate counterfactual via value estimate: would opposite be better?
+            cf_concepts = concepts * 0.5  # perturbed concept space
+            cf_bias = self.concept_hyp.get_action_bias(cf_concepts, self._body_features)
+            cf_b = cf_bias[:n] if len(cf_bias) >= n else np.pad(cf_bias, (0, n - len(cf_bias)))
+            # Blend a fraction of the opposite action weighted by counterfactual gene
+            self._action = self._action * (1.0 - cfw * 0.15) + opposite * cfw * 0.15 + cf_b * cfw * 0.1
+            self._action = np.tanh(self._action)
 
         return self._action
 
@@ -683,6 +721,15 @@ class Agent:
         if self.ticks_alive % 20 == 0:
             self.trust_memory.decay(self.ticks_alive)
 
+        # Spacetime: update cognitive rate from emotions (advance happens in main loop)
+        self.spacetime.update_cognitive_rate(
+            fear=self.internal.fear,
+            curiosity=self.internal.curiosity,
+            energy=self.body.energy,
+            social_need=self.internal.social_need,
+            nostalgia=self.internal.nostalgia,
+        )
+
         # Social state decay (bonds, debts, grief)
         self.decay_social_state()
 
@@ -694,7 +741,7 @@ class Agent:
         # === Phase 6: Meta-concept learning ===
         meta_encoded = self.meta_concepts.encode_meta()
         self.meta_concepts.predict_next_meta(self._action)
-        self.meta_concepts.learn_meta_wm(meta_encoded)
+        self.meta_concepts.learn_meta_wm(meta_encoded, action=self._action)
         # Meta-concept accuracy reward
         meta_acc = self.meta_concepts.cumulative_accuracy
         if meta_acc > 0.3:
@@ -730,6 +777,14 @@ class Agent:
         )
         if self.ticks_alive % 50 == 0:
             self.episodic.consolidate(self.ticks_alive)
+
+        # Active episodic replay
+        if self._episodic_replay_depth > 0 and self.ticks_alive % 10 == 0:
+            replayed = self.episodic.retrieve(concepts_now, emotional_val, self.ticks_alive,
+                                              top_k=self._episodic_replay_depth)
+            for ep in replayed:
+                if ep.outcome != 0:
+                    self.brain.learn_world_model(ep.concepts)
 
         # === Phase 10: Naming decay ===
         if self.ticks_alive % 20 == 0:
@@ -780,14 +835,18 @@ class Agent:
         curiosity = self.internal.curiosity
         daydream_drive = boredom * 0.6 + curiosity * 0.4
         # Daydream probability: ~5-15% per tick when bored+curious
-        if self._daydream_rng.random() < daydream_drive * 0.15:
+        # Phase 13: innovation_drive gene multiplies daydream probability
+        daydream_prob = daydream_drive * 0.15 * (1.0 + self._innovation_drive)
+        if self._daydream_rng.random() < daydream_prob:
             dream_value, dream_novelty = self.brain.daydream(self._daydream_rng)
             # Novelty reward: "that was a new thought" — regardless of usefulness
+            # Past inspirations boost curiosity reward (successful daydreamers get more from it)
+            inspiration_bonus = 1.0 + 0.1 * min(10, self.brain._inspiration_count)
             if dream_novelty > 0.3:
-                reward += dream_novelty * 0.05 * curiosity
+                reward += dream_novelty * 0.05 * curiosity * inspiration_bonus
             # Inspiration reward: novel AND valuable daydream
             if dream_novelty > 0.5 and dream_value > 0.1:
-                reward += 0.2  # eureka moment
+                reward += 0.2 * inspiration_bonus  # eureka moment
 
         # Phase 4: Mortality update
         self.mortality.update_trends(self.body.energy, self.body.health, effective_damage)
@@ -860,7 +919,11 @@ class Agent:
         concepts = self.brain.get_concepts()
         surprise = getattr(self, '_last_surprise', 0.0)
         if abs(reward) > 0.3 or surprise > 0.5 or abs(energy_gained) > 0.1:
-            self.kv_memory.write(concepts, concepts)
+            kv_value = np.concatenate([self._action[:min(4, len(self._action))],
+                                       np.array([reward, self.body.energy])])
+            kv_val = np.zeros(self.bottleneck_size)
+            kv_val[:min(len(kv_value), self.bottleneck_size)] = kv_value[:self.bottleneck_size]
+            self.kv_memory.write(concepts, kv_val)
 
         if self.ticks_alive % 50 == 0 and self._hyp_rng is not None:
             self.concept_hyp.evolve(self._hyp_rng)
@@ -884,7 +947,8 @@ class Agent:
         branch_cost = max(0, self._think_branch_count - 1) * self._cfg.think_energy_cost * self._think_steps_used
         brain_cost += meta_cost + tom_cost + episodic_cost + naming_cost + goal_cost + workspace_cost + norm_cost + kv_cost + branch_cost
         morph_cost = self.morphology.total_metabolic_cost
-        think_cost = self._think_steps_used * self._cfg.think_energy_cost
+        # Think cost modulated by cognitive rate: hypervigilant agents burn more energy
+        think_cost = self._think_steps_used * self._cfg.think_energy_cost * self.spacetime.cognitive_rate
 
         # Phase 14: Quadratic isolation stress — loneliness is metabolically expensive
         sn = self.internal.social_need
@@ -941,6 +1005,14 @@ class Agent:
         v_grad = np.clip(v_grad, -1.0, 1.0)
         value_params += lr * v_grad
         self.brain.set_value_params(value_params)
+
+        # Policy gradient: reinforce actions that led to positive TD surprise
+        if td_error > 0 and self.brain._last_action is not None:
+            policy_lr = lr * 0.1
+            out = self.brain.output_layer
+            n_h = min(hidden.shape[0], out.W.shape[0])
+            pg_update = policy_lr * td_error * np.outer(hidden[:n_h], self.brain._last_action)
+            out.W[:n_h, :] += np.clip(pg_update, -1.0, 1.0)
 
     def strengthen_bond(self, other_id: int, amount: float = 0.05):
         """Strengthen attachment bond with a specific agent."""

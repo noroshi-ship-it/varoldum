@@ -1,15 +1,19 @@
 
 import numpy as np
 
+MAX_SUBSTANCES = 64
+NOVELTY_THRESHOLD = 0.18  # squared distance above which a new substance is born
+
 
 class Chemistry:
-    """Property-based chemistry system with 16 substances.
+    """Open-ended property-based chemistry.
+
+    Starts with 16 seed substances. Reactions between substances produce
+    blended property vectors. When a blend is sufficiently novel (far from
+    all existing substances), a NEW substance is created — up to 64 total.
 
     Each substance has a 6D property vector:
     [reactivity, volatility, toxicity, nutritive, catalytic, stability]
-
-    Reactions emerge from property interactions — not hardcoded.
-    Different world seeds produce different chemistries.
     """
 
     PROP_REACTIVITY = 0
@@ -20,7 +24,7 @@ class Chemistry:
     PROP_STABILITY = 5
     N_PROPERTIES = 6
 
-    # Substance categories
+    # Substance categories (for base 16 only)
     CAT_PRIMORDIAL = 0  # 0-3: common, stable, everywhere
     CAT_MINERAL = 1     # 4-7: clustered deposits, stable
     CAT_ORGANIC = 2     # 8-11: produced by reactions, nutritive or toxic
@@ -29,26 +33,24 @@ class Chemistry:
     def __init__(self, width, height, n_substances=16, rng=None):
         self.width = width
         self.height = height
-        self.n_substances = n_substances
+        self.n_base = n_substances  # original seed substances
+        self.n_substances = n_substances  # grows as new substances emerge
         self.rng = rng or np.random.default_rng(42)
 
-        # Concentration of each substance at each cell
-        self.substances = np.zeros((width, height, n_substances), dtype=np.float32)
+        # Pre-allocate everything to MAX_SUBSTANCES
+        self.substances = np.zeros((width, height, MAX_SUBSTANCES), dtype=np.float32)
+        self.substance_props = np.zeros((MAX_SUBSTANCES, self.N_PROPERTIES), dtype=np.float32)
+        self.affinity_matrix = np.zeros((MAX_SUBSTANCES, MAX_SUBSTANCES), dtype=np.float32)
+        self.reaction_products = np.full((MAX_SUBSTANCES, MAX_SUBSTANCES), -1, dtype=np.int32)
+        self.yield_matrix = np.zeros((MAX_SUBSTANCES, MAX_SUBSTANCES), dtype=np.float32)
+        self.heat_matrix = np.zeros((MAX_SUBSTANCES, MAX_SUBSTANCES), dtype=np.float32)
+        self.catalyst_for = np.full((MAX_SUBSTANCES, MAX_SUBSTANCES), -1, dtype=np.int32)
+        self.diffusion_rates = np.zeros(MAX_SUBSTANCES, dtype=np.float32)
 
-        # Property matrix: what each substance IS
-        self.substance_props = np.zeros((n_substances, self.N_PROPERTIES), dtype=np.float32)
-
-        # Precomputed reaction data
-        self.affinity_matrix = np.zeros((n_substances, n_substances), dtype=np.float32)
-        self.reaction_products = np.full((n_substances, n_substances), -1, dtype=np.int32)
-        self.yield_matrix = np.zeros((n_substances, n_substances), dtype=np.float32)
-        self.heat_matrix = np.zeros((n_substances, n_substances), dtype=np.float32)
-
-        # Catalyst lookup: catalyst_for[i,j] = substance index that catalyzes i+j, or -1
-        self.catalyst_for = np.full((n_substances, n_substances), -1, dtype=np.int32)
-
-        # Diffusion rates per substance (volatiles diffuse faster)
-        self.diffusion_rates = np.zeros(n_substances, dtype=np.float32)
+        # Track which substances are emergent (born from reactions)
+        self.substance_origin = np.full(MAX_SUBSTANCES, -1, dtype=np.int32)  # -1 = seed
+        self.substance_born_tick = np.full(MAX_SUBSTANCES, -1, dtype=np.int32)
+        self._creation_tick = 0
 
         # Medicine recipes: list of (A, B, min_temp, max_temp, heal_amount)
         self.medicine_recipes = []
@@ -65,107 +67,227 @@ class Chemistry:
         # Primordial (0-3): high stability, low reactivity, moderate everything
         for i in range(4):
             props[i] = [
-                self.rng.uniform(0.05, 0.2),   # reactivity: low
-                self.rng.uniform(0.05, 0.15),   # volatility: low
-                self.rng.uniform(0.0, 0.1),     # toxicity: very low
-                self.rng.uniform(0.1, 0.4),     # nutritive: some food value
-                self.rng.uniform(0.0, 0.15),    # catalytic: low
-                self.rng.uniform(0.7, 0.95),    # stability: high
+                self.rng.uniform(0.05, 0.2),
+                self.rng.uniform(0.05, 0.15),
+                self.rng.uniform(0.0, 0.1),
+                self.rng.uniform(0.1, 0.4),
+                self.rng.uniform(0.0, 0.15),
+                self.rng.uniform(0.7, 0.95),
             ]
 
         # Minerals (4-7): stable, non-volatile, potentially catalytic
         for i in range(4, 8):
             props[i] = [
-                self.rng.uniform(0.1, 0.4),     # reactivity: moderate
-                self.rng.uniform(0.0, 0.1),     # volatility: very low
-                self.rng.uniform(0.0, 0.2),     # toxicity: low
-                self.rng.uniform(0.0, 0.1),     # nutritive: barely edible
-                self.rng.uniform(0.1, 0.6),     # catalytic: can be high
-                self.rng.uniform(0.6, 0.9),     # stability: high
+                self.rng.uniform(0.1, 0.4),
+                self.rng.uniform(0.0, 0.1),
+                self.rng.uniform(0.0, 0.2),
+                self.rng.uniform(0.0, 0.1),
+                self.rng.uniform(0.1, 0.6),
+                self.rng.uniform(0.6, 0.9),
             ]
 
         # Organics (8-11): produced by reactions, nutritive OR toxic
         for i in range(8, 12):
             is_toxic = self.rng.random() > 0.5
             props[i] = [
-                self.rng.uniform(0.2, 0.5),     # reactivity: moderate
-                self.rng.uniform(0.1, 0.3),     # volatility: some
+                self.rng.uniform(0.2, 0.5),
+                self.rng.uniform(0.1, 0.3),
                 self.rng.uniform(0.5, 0.9) if is_toxic else self.rng.uniform(0.0, 0.15),
                 self.rng.uniform(0.0, 0.1) if is_toxic else self.rng.uniform(0.4, 0.9),
-                self.rng.uniform(0.0, 0.2),     # catalytic: low
-                self.rng.uniform(0.3, 0.6),     # stability: medium
+                self.rng.uniform(0.0, 0.2),
+                self.rng.uniform(0.3, 0.6),
             ]
 
         # Volatiles (12-15): reactive, evaporate fast, spread quickly
         for i in range(12, 16):
             props[i] = [
-                self.rng.uniform(0.5, 0.95),    # reactivity: high
-                self.rng.uniform(0.5, 0.9),     # volatility: high
-                self.rng.uniform(0.1, 0.5),     # toxicity: variable
-                self.rng.uniform(0.0, 0.2),     # nutritive: low
-                self.rng.uniform(0.0, 0.3),     # catalytic: some
-                self.rng.uniform(0.1, 0.4),     # stability: low
+                self.rng.uniform(0.5, 0.95),
+                self.rng.uniform(0.5, 0.9),
+                self.rng.uniform(0.1, 0.5),
+                self.rng.uniform(0.0, 0.2),
+                self.rng.uniform(0.0, 0.3),
+                self.rng.uniform(0.1, 0.4),
             ]
 
-        # Diffusion rates: proportional to volatility
-        self.diffusion_rates = 0.005 + 0.03 * props[:, self.PROP_VOLATILITY]
+        # Diffusion rates for base substances
+        for i in range(self.n_base):
+            self.diffusion_rates[i] = 0.005 + 0.03 * props[i, self.PROP_VOLATILITY]
 
     def _init_reactions(self):
         """Precompute reaction affinities, products, yields, and catalysts."""
+        self._compute_all_affinities()
+        self._compute_all_products()
+        self._compute_all_catalysts()
+
+    def _compute_all_affinities(self):
+        """Compute affinity between every pair of active substances."""
         props = self.substance_props
         n = self.n_substances
-
-        # Affinity: reactivity product * (1 - stability average)
-        # High reactivity + low stability = reacts easily
         for i in range(n):
             for j in range(i + 1, n):
-                r_prod = props[i, self.PROP_REACTIVITY] * props[j, self.PROP_REACTIVITY]
-                s_avg = (props[i, self.PROP_STABILITY] + props[j, self.PROP_STABILITY]) / 2
-                affinity = r_prod * (1.0 - s_avg * 0.7)
-                self.affinity_matrix[i, j] = affinity
-                self.affinity_matrix[j, i] = affinity
+                self._compute_affinity(i, j, props)
 
-        # Products: blend properties, find nearest existing substance
+    def _compute_affinity(self, i, j, props=None):
+        if props is None:
+            props = self.substance_props
+        r_prod = props[i, self.PROP_REACTIVITY] * props[j, self.PROP_REACTIVITY]
+        s_avg = (props[i, self.PROP_STABILITY] + props[j, self.PROP_STABILITY]) / 2
+        affinity = r_prod * (1.0 - s_avg * 0.7)
+        self.affinity_matrix[i, j] = affinity
+        self.affinity_matrix[j, i] = affinity
+
+    def _compute_all_products(self):
+        """Compute reaction products for common pairs. Rare pairs left for runtime discovery.
+
+        Only pre-compute products for pairs where BOTH reactants are in the same
+        category (primordial+primordial, mineral+mineral, etc.) or where affinity
+        is below 0.06. Cross-category high-affinity pairs are left uncomputed —
+        they'll be discovered at runtime when substances actually meet, potentially
+        creating new emergent substances.
+        """
+        props = self.substance_props
+        n = self.n_substances
         for i in range(n):
             for j in range(i + 1, n):
                 if self.affinity_matrix[i, j] < 0.02:
-                    continue  # no reaction
+                    continue
+                # Pre-compute only "obvious" reactions; leave rare ones for runtime
+                same_category = (i // 4) == (j // 4)
+                low_affinity = self.affinity_matrix[i, j] < 0.06
+                if same_category or low_affinity:
+                    self._compute_product(i, j, props)
+                # else: left with reaction_products[i,j] = -1, discovered at runtime
 
-                # Product properties = weighted blend with nonlinear mixing
-                blend = (props[i] + props[j]) / 2
-                # Reactions tend to increase stability and decrease reactivity
-                blend[self.PROP_STABILITY] = min(1.0, blend[self.PROP_STABILITY] + 0.15)
-                blend[self.PROP_REACTIVITY] = max(0.0, blend[self.PROP_REACTIVITY] - 0.1)
-                # Toxicity can emerge from mixing
-                if props[i, self.PROP_TOXICITY] > 0.3 or props[j, self.PROP_TOXICITY] > 0.3:
-                    blend[self.PROP_TOXICITY] = min(1.0, blend[self.PROP_TOXICITY] + 0.1)
+    def _compute_product(self, i, j, props=None):
+        """Compute product of reaction i+j. May create a new substance."""
+        if props is None:
+            props = self.substance_props
 
-                # Find nearest substance (excluding reactants)
-                best_dist = float('inf')
-                best_k = -1
-                for k in range(n):
-                    if k == i or k == j:
-                        continue
-                    dist = np.sum((props[k] - blend) ** 2)
-                    if dist < best_dist:
-                        best_dist = dist
-                        best_k = k
+        blend = (props[i] + props[j]) / 2.0
+        blend[self.PROP_STABILITY] = min(1.0, blend[self.PROP_STABILITY] + 0.15)
+        blend[self.PROP_REACTIVITY] = max(0.0, blend[self.PROP_REACTIVITY] - 0.1)
+        if props[i, self.PROP_TOXICITY] > 0.3 or props[j, self.PROP_TOXICITY] > 0.3:
+            blend[self.PROP_TOXICITY] = min(1.0, blend[self.PROP_TOXICITY] + 0.1)
+        # Nonlinear mixing: cross-category reactions push properties beyond averages
+        # This is what makes emergent substances genuinely novel
+        cat_i, cat_j = i // 4, j // 4
+        if i < self.n_base and j < self.n_base and cat_i != cat_j:
+            # Synergy: properties multiply rather than average for dissimilar reactants
+            diff = np.abs(props[i] - props[j])
+            # Where reactants differ most, the product gets pushed further out
+            blend += self.rng.uniform(-0.15, 0.25, self.N_PROPERTIES) * diff
+        elif i >= self.n_base or j >= self.n_base:
+            # Second-generation: emergent + anything → more drift
+            blend += self.rng.uniform(-0.1, 0.2, self.N_PROPERTIES)
+        blend = np.clip(blend, 0.0, 1.0)
 
-                self.reaction_products[i, j] = best_k
-                self.reaction_products[j, i] = best_k
+        best_k = self._find_or_create_product(blend, i, j)
 
-                # Yield: inverse of stability difference (stable products form easier)
-                self.yield_matrix[i, j] = 0.5 + 0.5 * props[best_k, self.PROP_STABILITY]
-                self.yield_matrix[j, i] = self.yield_matrix[i, j]
+        self.reaction_products[i, j] = best_k
+        self.reaction_products[j, i] = best_k
 
-                # Heat: exothermic if product is more stable than reactants
-                reactant_stability = (props[i, self.PROP_STABILITY] + props[j, self.PROP_STABILITY]) / 2
-                product_stability = props[best_k, self.PROP_STABILITY]
-                self.heat_matrix[i, j] = (product_stability - reactant_stability) * 0.3
-                self.heat_matrix[j, i] = self.heat_matrix[i, j]
+        self.yield_matrix[i, j] = 0.5 + 0.5 * props[best_k, self.PROP_STABILITY]
+        self.yield_matrix[j, i] = self.yield_matrix[i, j]
 
-        # Catalysts: substances with high catalytic property catalyze reactions
-        # between substances they're chemically "between" in property space
+        reactant_stability = (props[i, self.PROP_STABILITY] + props[j, self.PROP_STABILITY]) / 2
+        product_stability = props[best_k, self.PROP_STABILITY]
+        self.heat_matrix[i, j] = (product_stability - reactant_stability) * 0.3
+        self.heat_matrix[j, i] = self.heat_matrix[i, j]
+
+    def _find_or_create_product(self, blend, reactant_i, reactant_j):
+        """Find nearest existing substance or create a new emergent one."""
+        props = self.substance_props
+        n = self.n_substances
+
+        best_dist = float('inf')
+        best_k = -1
+        for k in range(n):
+            if k == reactant_i or k == reactant_j:
+                continue
+            dist = float(np.sum((props[k] - blend) ** 2))
+            if dist < best_dist:
+                best_dist = dist
+                best_k = k
+
+        # If blend is novel enough and we have room, create a new substance
+        if best_dist > NOVELTY_THRESHOLD and n < MAX_SUBSTANCES:
+            best_k = self._create_substance(blend)
+
+        return best_k
+
+    def _create_substance(self, properties):
+        """Birth a new emergent substance. Returns its index."""
+        idx = self.n_substances
+        self.n_substances += 1
+
+        self.substance_props[idx] = np.clip(properties, 0.0, 1.0)
+        self.diffusion_rates[idx] = 0.005 + 0.03 * properties[self.PROP_VOLATILITY]
+        self.substance_origin[idx] = 1  # emergent
+        self.substance_born_tick[idx] = self._creation_tick
+
+        # Compute affinities with all existing substances
+        for k in range(idx):
+            self._compute_affinity(k, idx)
+
+        # Compute products for reactions involving this new substance
+        # (but don't recurse — new products from this won't create further substances
+        #  until the next _init_reactions cycle, preventing chain creation)
+        for k in range(idx):
+            if self.affinity_matrix[k, idx] >= 0.02:
+                self._compute_product_no_create(k, idx)
+
+        return idx
+
+    def _compute_product_no_create(self, i, j):
+        """Compute product without creating new substances (prevents cascade)."""
+        props = self.substance_props
+        blend = (props[i] + props[j]) / 2.0
+        blend[self.PROP_STABILITY] = min(1.0, blend[self.PROP_STABILITY] + 0.15)
+        blend[self.PROP_REACTIVITY] = max(0.0, blend[self.PROP_REACTIVITY] - 0.1)
+        if props[i, self.PROP_TOXICITY] > 0.3 or props[j, self.PROP_TOXICITY] > 0.3:
+            blend[self.PROP_TOXICITY] = min(1.0, blend[self.PROP_TOXICITY] + 0.1)
+        blend = np.clip(blend, 0.0, 1.0)
+
+        best_dist = float('inf')
+        best_k = -1
+        for k in range(self.n_substances):
+            if k == i or k == j:
+                continue
+            dist = float(np.sum((props[k] - blend) ** 2))
+            if dist < best_dist:
+                best_dist = dist
+                best_k = k
+
+        if best_k < 0:
+            return
+
+        self.reaction_products[i, j] = best_k
+        self.reaction_products[j, i] = best_k
+        self.yield_matrix[i, j] = 0.5 + 0.5 * props[best_k, self.PROP_STABILITY]
+        self.yield_matrix[j, i] = self.yield_matrix[i, j]
+        reactant_stability = (props[i, self.PROP_STABILITY] + props[j, self.PROP_STABILITY]) / 2
+        product_stability = props[best_k, self.PROP_STABILITY]
+        self.heat_matrix[i, j] = (product_stability - reactant_stability) * 0.3
+        self.heat_matrix[j, i] = self.heat_matrix[i, j]
+
+    def _discover_new_reactions(self):
+        """Runtime: scan for substance pairs missing affinities or products.
+        Called periodically — allows emergent substances to react with each other."""
+        n = self.n_substances
+        for i in range(n):
+            for j in range(i + 1, n):
+                # Compute affinity if missing (new substance pairs)
+                if self.affinity_matrix[i, j] < 1e-9:
+                    self._compute_affinity(i, j)
+                # Compute product if affinity exists but no product yet
+                if self.affinity_matrix[i, j] >= 0.02 and self.reaction_products[i, j] < 0:
+                    self._compute_product(i, j)
+        # Recompute catalysts for any new substances
+        self._compute_all_catalysts()
+
+    def _compute_all_catalysts(self):
+        props = self.substance_props
+        n = self.n_substances
         for c in range(n):
             if props[c, self.PROP_CATALYTIC] < 0.3:
                 continue
@@ -175,7 +297,8 @@ class Chemistry:
                         continue
                     if c == i or c == j:
                         continue
-                    # Catalyst works if it's "between" reactants in some property dimension
+                    if self.catalyst_for[i, j] >= 0:
+                        continue  # already has a catalyst
                     between_count = 0
                     for p in range(self.N_PROPERTIES):
                         lo = min(props[i, p], props[j, p])
@@ -185,16 +308,15 @@ class Chemistry:
                     if between_count >= 3:
                         self.catalyst_for[i, j] = c
                         self.catalyst_for[j, i] = c
-                        break  # only one catalyst per reaction
 
     def _init_medicine_recipes(self):
         """Generate 2-4 medicine recipes that agents must discover."""
         n_recipes = self.rng.integers(2, 5)
         for _ in range(n_recipes):
-            a = self.rng.integers(0, self.n_substances)
-            b = self.rng.integers(0, self.n_substances)
+            a = self.rng.integers(0, self.n_base)
+            b = self.rng.integers(0, self.n_base)
             while b == a:
-                b = self.rng.integers(0, self.n_substances)
+                b = self.rng.integers(0, self.n_base)
             min_temp = self.rng.uniform(0.3, 0.5)
             max_temp = min_temp + self.rng.uniform(0.15, 0.3)
             heal = self.rng.uniform(0.05, 0.2)
@@ -247,12 +369,9 @@ class Chemistry:
             np.clip(self.substances[:, :, i], 0, 1, out=self.substances[:, :, i])
 
     def update(self, tick, temperature):
-        """Main chemistry update. Called from main loop.
+        """Main chemistry update. Called from main loop."""
+        self._creation_tick = tick
 
-        Args:
-            tick: current simulation tick
-            temperature: (W, H) float32 array of temperatures
-        """
         # Reactions every 4 ticks
         if tick % 4 == 0:
             self._run_reactions(temperature)
@@ -264,6 +383,10 @@ class Chemistry:
         # Decay unstable substances
         if tick % 8 == 0:
             self._decay()
+
+        # Runtime discovery: compute missing reaction products (may create substances)
+        if tick > 0 and tick % 50 == 0:
+            self._discover_new_reactions()
 
     def _run_reactions(self, temperature):
         """Run all pairwise reactions. Vectorized numpy."""
@@ -279,25 +402,23 @@ class Chemistry:
 
                 prod_idx = self.reaction_products[i, j]
                 if prod_idx < 0:
-                    continue
+                    # Runtime: compute product on-the-fly (may create new substance)
+                    self._compute_product(i, j)
+                    prod_idx = self.reaction_products[i, j]
+                    if prod_idx < 0:
+                        continue
 
                 ci = conc[:, :, i]
                 cj = conc[:, :, j]
 
-                # Only react where both present above threshold
                 mask = (ci > 0.01) & (cj > 0.01)
                 if not np.any(mask):
                     continue
 
-                # Base reaction rate
                 rate = aff * np.minimum(ci, cj) * 0.02
-
-                # Temperature factor: Arrhenius-like
-                # Higher temp = faster reactions (up to a point)
                 temp_factor = np.clip(temperature * 2.0, 0.1, 2.0)
                 rate *= temp_factor
 
-                # Catalyst boost
                 cat_idx = self.catalyst_for[i, j]
                 if cat_idx >= 0:
                     cat_present = conc[:, :, cat_idx] > 0.05
@@ -305,37 +426,30 @@ class Chemistry:
 
                 rate *= mask
 
-                # Consume reactants, produce product
                 consumed = np.minimum(rate, np.minimum(ci, cj))
                 conc[:, :, i] -= consumed
                 conc[:, :, j] -= consumed
                 conc[:, :, prod_idx] += consumed * self.yield_matrix[i, j]
 
-                # Heat
                 heat_produced += consumed * self.heat_matrix[i, j]
 
-        # Clamp all
         np.clip(conc, 0, 1, out=conc)
-
         return heat_produced
 
     def _diffuse(self, temperature):
-        """Diffuse substances based on volatility. Volatiles spread faster at high temp."""
+        """Diffuse substances based on volatility."""
         for i in range(self.n_substances):
             c = self.substances[:, :, i]
             if np.max(c) < 0.001:
                 continue
 
             rate = self.diffusion_rates[i]
-
-            # Volatiles diffuse faster at high temperature
             vol = self.substance_props[i, self.PROP_VOLATILITY]
             if vol > 0.3:
                 effective_rate = rate * (1.0 + temperature * vol)
             else:
                 effective_rate = rate
 
-            # 4-neighbor diffusion with wrap
             avg = (
                 np.roll(c, 1, 0) + np.roll(c, -1, 0) +
                 np.roll(c, 1, 1) + np.roll(c, -1, 1)
@@ -343,7 +457,6 @@ class Chemistry:
 
             c += effective_rate * (avg - c)
 
-            # Evaporation for volatiles at high temp
             if vol > 0.4:
                 evap_rate = 0.002 * vol * temperature
                 c -= evap_rate
@@ -360,17 +473,19 @@ class Chemistry:
                 self.substances[:, :, i] *= (1.0 - decay_rate)
 
     def get_concentrations(self, x, y):
-        """Get all substance concentrations at a position. Returns (n_substances,) array."""
-        return self.substances[x % self.width, y % self.height].copy()
+        """Get all substance concentrations at a position."""
+        return self.substances[x % self.width, y % self.height, :self.n_substances].copy()
 
     def get_top_substances(self, x, y, n=4):
         """Get indices and concentrations of top-n substances at position."""
-        conc = self.substances[x % self.width, y % self.height]
+        conc = self.substances[x % self.width, y % self.height, :self.n_substances]
         indices = np.argsort(conc)[-n:][::-1]
         return indices, conc[indices]
 
     def consume_substance(self, x, y, substance_idx, amount=0.1):
         """Agent consumes a substance. Returns actual amount consumed."""
+        if substance_idx < 0 or substance_idx >= self.n_substances:
+            return 0.0
         x, y = x % self.width, y % self.height
         available = self.substances[x, y, substance_idx]
         consumed = min(amount, available)
@@ -379,27 +494,39 @@ class Chemistry:
 
     def deposit_substance(self, x, y, substance_idx, amount):
         """Agent deposits a substance at location."""
+        if substance_idx < 0 or substance_idx >= self.n_substances:
+            return
         x, y = x % self.width, y % self.height
-        self.substances[x, y, substance_idx] = min(1.0, self.substances[x, y, substance_idx] + amount)
+        self.substances[x, y, substance_idx] = min(
+            1.0, self.substances[x, y, substance_idx] + amount)
+
+    def deposit_composition(self, x, y, composition):
+        """Deposit an entire composition array at location (e.g. body decomposition)."""
+        x, y = x % self.width, y % self.height
+        n = min(len(composition), self.n_substances)
+        self.substances[x, y, :n] += composition[:n]
+        np.clip(self.substances[x, y], 0, 1, out=self.substances[x, y])
 
     def get_nutritive_value(self, substance_idx):
         """How much energy an agent gets from eating this substance."""
-        return self.substance_props[substance_idx, self.PROP_NUTRITIVE]
+        if substance_idx < 0 or substance_idx >= MAX_SUBSTANCES:
+            return 0.0
+        return float(self.substance_props[substance_idx, self.PROP_NUTRITIVE])
 
     def get_toxicity(self, substance_idx):
         """How much damage an agent takes from this substance."""
-        return self.substance_props[substance_idx, self.PROP_TOXICITY]
+        if substance_idx < 0 or substance_idx >= MAX_SUBSTANCES:
+            return 0.0
+        return float(self.substance_props[substance_idx, self.PROP_TOXICITY])
 
     def check_medicine(self, x, y, temperature_here):
-        """Check if medicine can be created at this location.
-        Returns heal amount or 0."""
+        """Check if medicine can be created at this location."""
         x, y = x % self.width, y % self.height
         conc = self.substances[x, y]
 
         for a, b, min_t, max_t, heal in self.medicine_recipes:
             if conc[a] > 0.05 and conc[b] > 0.05:
                 if min_t <= temperature_here <= max_t:
-                    # Consume ingredients
                     used = min(0.05, conc[a], conc[b])
                     self.substances[x, y, a] -= used
                     self.substances[x, y, b] -= used
@@ -407,17 +534,22 @@ class Chemistry:
         return 0.0
 
     def get_reaction_count(self):
-        """How many active reactions exist (for stats)."""
-        return int(np.sum(self.affinity_matrix > 0.02)) // 2
+        """How many active reactions exist."""
+        n = self.n_substances
+        return int(np.sum(self.affinity_matrix[:n, :n] > 0.02)) // 2
 
     def get_stats(self):
         """Summary statistics for logging."""
-        total = np.sum(self.substances)
-        per_substance = np.sum(self.substances, axis=(0, 1))
+        n = self.n_substances
+        total = float(np.sum(self.substances[:, :, :n]))
+        per_substance = np.sum(self.substances[:, :, :n], axis=(0, 1))
         dominant = int(np.argmax(per_substance))
+        n_emergent = int(np.sum(self.substance_origin[:n] >= 0))
         return {
-            "total_substance_mass": float(total),
+            "total_substance_mass": total,
             "dominant_substance": dominant,
             "n_active_reactions": self.get_reaction_count(),
             "n_medicine_recipes": len(self.medicine_recipes),
+            "n_substances": n,
+            "n_emergent_substances": n_emergent,
         }

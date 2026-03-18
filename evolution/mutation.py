@@ -6,6 +6,7 @@ from agents.genome import (
     SOCIETY_OFFSET, SOCIETY_COUNT, META_OFFSET, META_COUNT,
     COGNITIVE_OFFSET, COGNITIVE_COUNT,
     EMERGENCE_OFFSET, EMERGENCE_COUNT,
+    PHASE16_OFFSET, PHASE16_COUNT,
     FIXED_GENE_COUNT, clamp_genome
 )
 
@@ -61,6 +62,12 @@ def mutate(genome: np.ndarray, rng: np.random.Generator) -> np.ndarray:
     for i in range(EMERGENCE_COUNT):
         if rng.random() < 0.25:
             idx = EMERGENCE_OFFSET + i
+            child[idx] += rng.normal(0, mutation_rate * 2)
+
+    # Phase 16 genes
+    for i in range(PHASE16_COUNT):
+        if rng.random() < 0.3:
+            idx = PHASE16_OFFSET + i
             child[idx] += rng.normal(0, mutation_rate * 2)
 
     nn_start = FIXED_GENE_COUNT

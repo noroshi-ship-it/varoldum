@@ -228,7 +228,7 @@ def random_genome(cfg: Config, max_nn_params: int, rng: np.random.Generator) -> 
     genes[EMERGENCE_OFFSET + 0] = rng.uniform(0.0, 1.0)        # workspace_slots (start small)
     genes[EMERGENCE_OFFSET + 1] = rng.uniform(0.0, 0.2)        # workspace_gate (start weak)
     genes[EMERGENCE_OFFSET + 2] = rng.uniform(1.0, 1.5)        # think_branch_count (start ~1)
-    genes[EMERGENCE_OFFSET + 3] = rng.uniform(0.0, 1.0)        # norm_capacity (start small)
+    genes[EMERGENCE_OFFSET + 3] = rng.uniform(1.0, 4.0)        # norm_capacity (at least 1 slot)
     genes[EMERGENCE_OFFSET + 4] = rng.uniform(0.0, 0.2)        # norm_sensitivity (start weak)
     genes[EMERGENCE_OFFSET + 5] = rng.uniform(0.0, 0.5)        # abstract_naming (start small)
     genes[EMERGENCE_OFFSET + 6] = rng.uniform(0.0, 0.2)        # temporal_encoding (start weak)

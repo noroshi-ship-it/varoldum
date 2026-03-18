@@ -153,9 +153,11 @@ class ComposableRule:
 
 class ComposableRuleSystem:
 
-    def __init__(self, max_rules: int = 24, action_dim: int = 8):
+    def __init__(self, max_rules: int = 24, action_dim: int = 8,
+                 max_complexity: int = 4):
         self.max_rules = max_rules
         self.action_dim = action_dim
+        self.max_complexity = max_complexity
         self.rules: list[ComposableRule] = []
         self.temporal = TemporalBuffer(window_size=100)
         self._generation_count = 0
@@ -251,7 +253,7 @@ class ComposableRuleSystem:
             else:
                 child.conditions.append(Condition(c.feature, c.comparator, c.threshold))
 
-        if rng.random() < 0.1 and len(child.conditions) < 4:
+        if rng.random() < 0.1 and len(child.conditions) < self.max_complexity:
             child.conditions.append(Condition(
                 int(rng.integers(0, n_feat)), int(rng.integers(0, n_comp)),
                 float(rng.uniform(0.1, 0.9)),

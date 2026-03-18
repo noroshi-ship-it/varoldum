@@ -75,9 +75,9 @@ class Ecology:
         total_plants = np.sum(self.plants, axis=2)
         self.fauna[:, :, 0] = np.where(total_plants > 0.2, 0.05, 0.0)
 
-        # Very sparse predators
-        pred_mask = self.rng.random((self.w, self.h)) < 0.01
-        self.fauna[:, :, 1] = pred_mask.astype(np.float32) * 0.02
+        # Sparse predators (~5x higher initial density)
+        pred_mask = self.rng.random((self.w, self.h)) < 0.05
+        self.fauna[:, :, 1] = pred_mask.astype(np.float32) * 0.1
 
         # Decomposers everywhere at low density
         self.fauna[:, :, 2] = 0.01

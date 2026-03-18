@@ -270,6 +270,14 @@ class Agent:
         value_params += lr * v_grad
         self.brain.set_value_params(value_params)
 
+        # Policy gradient: reinforce actions that led to positive TD surprise
+        if td_error > 0 and self.brain._last_action is not None:
+            policy_lr = lr * 0.1
+            out = self.brain.output_layer
+            n_h = min(hidden.shape[0], out.W.shape[0])
+            pg_update = policy_lr * td_error * np.outer(hidden[:n_h], self.brain._last_action)
+            out.W[:n_h, :] += np.clip(pg_update, -1.0, 1.0)
+
     def can_reproduce(self):
         threshold = get_trait(self.genome, "reproduction_threshold")
         return (

@@ -80,20 +80,29 @@ class ProtoLanguage:
         ))
         self._tick_stats["signals_sent"] += 1
 
+    PROPAGATION_SPEED = 4.0  # cells per tick — finite speed of sound
+
     def get_heard_signals(self, agent, tick: int) -> list[Utterance]:
         heard = []
         ax, ay = agent.body.position[0], agent.body.position[1]
         for u in self._utterances:
             if u.sender_id == agent.id:
                 continue
-            if u.tick < tick - 3:
+            max_age = self.hear_radius / self.PROPAGATION_SPEED + 1
+            if u.tick < tick - max_age:
                 continue
             dx = abs(u.sender_pos[0] - ax)
             dy = abs(u.sender_pos[1] - ay)
             dx = min(dx, self.w - dx)
             dy = min(dy, self.h - dy)
-            if dx <= self.hear_radius and dy <= self.hear_radius:
-                heard.append(u)
+            d = dx + dy
+            if d > self.hear_radius:
+                continue
+            # Causal delay: signal needs time to travel
+            travel_time = d / self.PROPAGATION_SPEED
+            if tick < u.tick + travel_time:
+                continue
+            heard.append(u)
         self._tick_stats["signals_heard"] += len(heard)
         return heard
 
@@ -119,7 +128,8 @@ class ProtoLanguage:
         return best.signal * atten
 
     def cleanup(self, tick: int):
-        self._utterances = [u for u in self._utterances if u.tick >= tick - 3]
+        max_age = self.hear_radius / self.PROPAGATION_SPEED + 2
+        self._utterances = [u for u in self._utterances if u.tick >= tick - max_age]
 
     @property
     def recent_stats(self):
