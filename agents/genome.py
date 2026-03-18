@@ -55,7 +55,7 @@ ABSTRACT_LOCI = {
 
 # Society engine genes (Phase 5)
 SOCIETY_OFFSET = ABSTRACT_OFFSET + ABSTRACT_COUNT  # 39
-SOCIETY_COUNT = 7
+SOCIETY_COUNT = 8
 
 SOCIETY_LOCI = {
     # Phase 5A: Social emotions
@@ -67,6 +67,8 @@ SOCIETY_LOCI = {
     "utility_pref_0":           (SOCIETY_OFFSET + 4, 0.0, 1.0),
     "utility_pref_1":           (SOCIETY_OFFSET + 5, 0.0, 1.0),
     "inventory_capacity":       (SOCIETY_OFFSET + 6, 2.0, 6.0),
+    # Nostalgia
+    "nostalgia_sensitivity":    (SOCIETY_OFFSET + 7, 0.0, 2.0),
 }
 
 FIXED_GENE_COUNT = NUM_TRAIT_GENES + ARCH_COUNT + MORPH_COUNT + CONCEPT_COUNT + ABSTRACT_COUNT + SOCIETY_COUNT
@@ -110,6 +112,7 @@ def random_genome(cfg: Config, max_nn_params: int, rng: np.random.Generator) -> 
     genes[SOCIETY_OFFSET + 4] = rng.uniform(0.2, 0.8)     # utility_pref_0
     genes[SOCIETY_OFFSET + 5] = rng.uniform(0.2, 0.8)     # utility_pref_1
     genes[SOCIETY_OFFSET + 6] = rng.uniform(2.0, 4.0)     # inventory_capacity
+    genes[SOCIETY_OFFSET + 7] = rng.uniform(0.5, 1.5)     # nostalgia_sensitivity
 
     nn_start = FIXED_GENE_COUNT
     genes[nn_start:] = rng.standard_normal(max_nn_params) * 0.3

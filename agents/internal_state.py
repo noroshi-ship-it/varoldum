@@ -15,6 +15,9 @@ class InternalState:
         self.trust_state = 0.5
         self.social_satisfaction = 0.0
 
+        # Nostalgia: longing for past better times
+        self.nostalgia = 0.0
+
         self._hunger_k = get_trait(genome, "hunger_sensitivity")
         self._fear_k = get_trait(genome, "fear_sensitivity")
         self._curiosity_k = get_trait(genome, "curiosity_sensitivity")
@@ -23,13 +26,17 @@ class InternalState:
         self._social_sensitivity_k = get_trait(genome, "social_sensitivity")
         self._trust_sensitivity_k = get_trait(genome, "trust_sensitivity")
         self._social_reward_k = get_trait(genome, "social_reward_sensitivity")
+        self._nostalgia_k = get_trait(genome, "nostalgia_sensitivity")
 
     def update(self, energy: float, health: float, sensor_vec: np.ndarray,
                surprise: float, temperature: float = 0.5,
                nearby_agents: int = 0,
                positive_interaction: float = 0.0,
                negative_interaction: float = 0.0,
-               social_reward: float = 0.0):
+               social_reward: float = 0.0,
+               reward_ema_slow: float = 0.0,
+               reward_ema_fast: float = 0.0,
+               memory_fullness: float = 0.0):
         dt = 0.1
 
         target_hunger = (1.0 - energy) * self._hunger_k
@@ -71,6 +78,11 @@ class InternalState:
         target_sat = max(0, self.social_satisfaction - decay) + social_reward * self._social_reward_k * 0.3
         self.social_satisfaction += dt * (target_sat - self.social_satisfaction)
 
+        # Nostalgia: past was better than present × memory strength
+        current_absence = max(0.0, reward_ema_slow - reward_ema_fast)
+        target_nostalgia = current_absence * memory_fullness * self._nostalgia_k
+        self.nostalgia += dt * (target_nostalgia - self.nostalgia)
+
         self.hunger = float(np.clip(self.hunger, 0, 1))
         self.fear = float(np.clip(self.fear, 0, 1))
         self.curiosity = float(np.clip(self.curiosity, 0, 1))
@@ -78,9 +90,11 @@ class InternalState:
         self.social_need = float(np.clip(self.social_need, 0, 1))
         self.trust_state = float(np.clip(self.trust_state, 0, 1))
         self.social_satisfaction = float(np.clip(self.social_satisfaction, 0, 1))
+        self.nostalgia = float(np.clip(self.nostalgia, 0, 1))
 
     def as_vector(self) -> np.ndarray:
         return np.array([
             self.hunger, self.fear, self.curiosity, self.temperature_comfort,
             self.social_need, self.trust_state, self.social_satisfaction,
+            self.nostalgia,
         ])

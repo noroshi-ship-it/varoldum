@@ -72,7 +72,7 @@ class Config:
 
     @property
     def internal_state_dim(self) -> int:
-        return 7
+        return 8
 
     @property
     def memory_summary_dim(self) -> int:

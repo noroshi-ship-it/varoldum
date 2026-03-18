@@ -40,6 +40,8 @@ class Agent:
         self._cfg = cfg
         self.generation = 0
         self.total_reward = 0.0
+        self._reward_ema_slow = 0.0  # long-term reward average (nostalgia)
+        self._reward_ema_fast = 0.0  # recent reward average (nostalgia)
         self.ticks_alive = 0
         self.children_count = 0
         self.lineage_id = self.id
@@ -419,6 +421,15 @@ class Agent:
         self.ticks_alive += 1
         self.total_reward += reward
 
+        # Reward EMAs for nostalgia: slow tracks long-term, fast tracks recent
+        alpha_slow = 0.001
+        alpha_fast = 0.05
+        self._reward_ema_slow += alpha_slow * (reward - self._reward_ema_slow)
+        self._reward_ema_fast += alpha_fast * (reward - self._reward_ema_fast)
+
+        # Memory fullness: how much past experience is stored
+        memory_fullness = self.memory.ltm.count / max(1, self.memory.ltm.capacity)
+
         effective_damage = damage_taken * (1.0 - self.morphology.damage_reduction)
 
         self.internal.update(
@@ -429,6 +440,9 @@ class Agent:
             positive_interaction=self._pending_positive_interaction,
             negative_interaction=self._pending_negative_interaction,
             social_reward=self._pending_social_reward,
+            reward_ema_slow=self._reward_ema_slow,
+            reward_ema_fast=self._reward_ema_fast,
+            memory_fullness=memory_fullness,
         )
         # Reset pending social signals
         self._pending_social_reward = 0.0
