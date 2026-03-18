@@ -42,6 +42,7 @@ class Agent:
         self.total_reward = 0.0
         self._reward_ema_slow = 0.0  # long-term reward average (nostalgia)
         self._reward_ema_fast = 0.0  # recent reward average (nostalgia)
+        self._daydream_rng = np.random.default_rng(self.id)
         self.ticks_alive = 0
         self.children_count = 0
         self.lineage_id = self.id
@@ -460,6 +461,23 @@ class Agent:
         self.self_model.observe_actual(actual_state, self.learning_rate)
 
         self.brain.learn_world_model(self.brain.get_concepts())
+
+        # === DAYDREAM / INSPIRATION ===
+        # Curiosity + boredom drives aimless imagination.
+        # Low surprise = world is predictable = boring = time to daydream.
+        # High curiosity = innate drive to explore concept space.
+        boredom = max(0.0, 0.5 - self.self_model.surprise)  # bored when unsurprised
+        curiosity = self.internal.curiosity
+        daydream_drive = boredom * 0.6 + curiosity * 0.4
+        # Daydream probability: ~5-15% per tick when bored+curious
+        if self._daydream_rng.random() < daydream_drive * 0.15:
+            dream_value, dream_novelty = self.brain.daydream(self._daydream_rng)
+            # Novelty reward: "that was a new thought" — regardless of usefulness
+            if dream_novelty > 0.3:
+                reward += dream_novelty * 0.05 * curiosity
+            # Inspiration reward: novel AND valuable daydream
+            if dream_novelty > 0.5 and dream_value > 0.1:
+                reward += 0.2  # eureka moment
 
         # Phase 4: Mortality update
         self.mortality.update_trends(self.body.energy, self.body.health, effective_damage)

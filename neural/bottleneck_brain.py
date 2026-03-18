@@ -77,6 +77,14 @@ class BottleneckBrain:
         self._thought_depth = 0
         self._thought_value_delta = 0.0
 
+        # Daydream / inspiration system
+        self._concept_history = np.zeros((16, self.bottleneck_size), dtype=np.float32)
+        self._concept_history_idx = 0
+        self._concept_history_count = 0
+        self._daydream_value = 0.0      # value of last daydream
+        self._daydream_novelty = 0.0    # how novel was last daydream
+        self._inspiration_count = 0     # times daydream led to discovery
+
     def get_concepts(self):
         return self._last_bottleneck
 
@@ -115,6 +123,67 @@ class BottleneckBrain:
         self._last_action = actions.copy()
 
         return actions, self._last_value
+
+    def daydream(self, rng: np.random.Generator) -> tuple[float, float]:
+        """Aimless imagination — explore concept space without sensory input.
+
+        Generates a random concept vector, runs it through the world model
+        with random actions, and evaluates novelty + value.
+        Returns (daydream_value_delta, novelty_score).
+
+        Most daydreams are garbage. But occasionally one discovers a valuable
+        region of concept space the agent hasn't visited — inspiration.
+        """
+        # Generate random starting point in concept space
+        # Mix: 70% random noise + 30% current concepts (grounded fantasy)
+        random_concepts = rng.standard_normal(self.bottleneck_size).astype(np.float32) * 0.8
+        dream_concepts = np.tanh(0.3 * self._last_bottleneck + 0.7 * random_concepts)
+
+        # Random action — "what if I did something completely different?"
+        dream_action = rng.standard_normal(self.action_dim).astype(np.float32) * 0.5
+        dream_action = np.clip(dream_action, -1, 1)
+
+        # Imagine what would happen
+        imagined_next = self.imagine_step(dream_concepts, dream_action)
+
+        # Chain: imagine 2 steps deep (deeper fantasy)
+        dream_action2 = rng.standard_normal(self.action_dim).astype(np.float32) * 0.5
+        dream_action2 = np.clip(dream_action2, -1, 1)
+        imagined_deep = self.imagine_step(imagined_next, dream_action2)
+
+        # Evaluate: is this imagined state valuable?
+        saved_h = self.gru.h.copy()
+        ctx_dim = self.context_dim
+        fake_ctx = np.zeros(ctx_dim)
+        gru_input = np.concatenate([imagined_deep, fake_ctx])
+        gru_out = self.gru.forward(gru_input)
+        dream_value = float(self.value_layer.forward(gru_out)[0])
+        self.gru.h = saved_h  # restore — daydream is sandbox
+
+        # Value delta: is the dream better than reality?
+        self._daydream_value = dream_value - self._last_value
+
+        # Novelty: how different is this from anything seen before?
+        novelty = 0.0
+        if self._concept_history_count > 0:
+            n = min(self._concept_history_count, 16)
+            diffs = self._concept_history[:n] - imagined_deep[np.newaxis, :]
+            min_dist = float(np.min(np.sqrt(np.sum(diffs ** 2, axis=1))))
+            novelty = min(1.0, min_dist / max(0.1, self.bottleneck_size * 0.3))
+        else:
+            novelty = 1.0  # first daydream is always novel
+        self._daydream_novelty = novelty
+
+        # Record in concept history
+        self._concept_history[self._concept_history_idx] = imagined_deep
+        self._concept_history_idx = (self._concept_history_idx + 1) % 16
+        self._concept_history_count = min(self._concept_history_count + 1, 16)
+
+        # Inspiration: daydream was both novel AND valuable
+        if novelty > 0.5 and self._daydream_value > 0.1:
+            self._inspiration_count += 1
+
+        return self._daydream_value, novelty
 
     def imagine_step(self, concepts: np.ndarray, action: np.ndarray) -> np.ndarray:
         wm_input = np.concatenate([concepts, action])
