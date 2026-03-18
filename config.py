@@ -103,6 +103,7 @@ class Config:
             + 2   # temporal context (Phase 13)
             + 3   # group identity context (Phase 13)
             + 3   # reputation, group safety (Phase 14)
+            + 8   # KV memory read (Phase 16)
         )
 
     @property

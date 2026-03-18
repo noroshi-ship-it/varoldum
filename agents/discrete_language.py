@@ -129,6 +129,23 @@ class DiscreteVocab:
             self.token_reliability[token_id] = max(
                 0.0, self.token_reliability[token_id] - 0.01)
 
+    def regularize_diversity(self, strength: float = 0.01):
+        """Push similar token meanings apart to prevent semantic collapse."""
+        for i in range(self.vocab_active):
+            for j in range(i + 1, self.vocab_active):
+                sim = float(np.dot(self.token_meanings[i], self.token_meanings[j]))
+                if sim > 0.9:
+                    diff = self.token_meanings[i] - self.token_meanings[j]
+                    diff_norm = np.linalg.norm(diff)
+                    if diff_norm > 1e-8:
+                        repulsion = strength * (sim - 0.9) * (diff / diff_norm)
+                        self.token_meanings[i] += repulsion
+                        self.token_meanings[j] -= repulsion
+                        for k in (i, j):
+                            n = np.linalg.norm(self.token_meanings[k])
+                            if n > 1e-8:
+                                self.token_meanings[k] /= n
+
     @property
     def stats(self) -> dict:
         active = int(np.sum(self._usage_count[:self.vocab_active] > 0))

@@ -21,6 +21,7 @@ from agents.naming import NamingSystem
 from agents.goal_system import GoalSystem
 from agents.concept_workspace import ConceptWorkspace
 from agents.norm_system import NormSystem
+from agents.kv_memory import KeyValueMemory
 from agents.genome import (
     get_trait, get_nn_weights, get_arch_genes, get_morph_genes,
     get_concept_genes, random_genome, FIXED_GENE_COUNT
@@ -69,7 +70,7 @@ class Agent:
         self.memory = MemorySystem(stm_cap, ltm_cap, entry_dim, cfg.memory_summary_dim)
 
         concept_genes = get_concept_genes(genome)
-        self.bottleneck_size = int(np.clip(round(concept_genes[0]), 2, 16))
+        self.bottleneck_size = int(np.clip(round(concept_genes[0]), 2, 128))  # Phase 16: up from 16
         self.think_steps = int(np.clip(round(concept_genes[1]), 0, 8))
 
         extra_sensor = self.morphology.extra_sensor_dim
@@ -222,6 +223,18 @@ class Agent:
         self.teaching_prestige = 0.0     # [0, 1] teaching success history
         self._nearby_avg_reputation = 0.0  # updated each tick from main loop
         self._group_safety_factor = 1.0    # updated each tick from main loop
+
+        # Phase 16: Addressable KV memory
+        kv_cap = int(round(get_trait(genome, "kv_memory_capacity")))
+        kv_read = get_trait(genome, "kv_read_strength")
+        kv_write = get_trait(genome, "kv_write_strength")
+        self.kv_memory = KeyValueMemory(
+            capacity=kv_cap, key_dim=self.bottleneck_size,
+            value_dim=self.bottleneck_size,
+            read_strength=kv_read, write_strength=kv_write,
+        )
+        # Phase 16: Shared symbol grounding
+        self._grounding_lr = get_trait(genome, "grounding_lr")
 
         # Phase 5: Society engine
         inv_capacity = int(round(get_trait(genome, "inventory_capacity")))
@@ -479,6 +492,8 @@ class Agent:
                 self._nearby_avg_reputation,
                 self._group_safety_factor,
             ], dtype=np.float64),
+            self.kv_memory.get_context_vector(  # 8 dims: KV memory read (Phase 16)
+                self.brain.get_concepts(), max_dim=8),
         ])
         return self._context
 
@@ -841,15 +856,23 @@ class Agent:
             self.listener.predict(self._heard_signal)
             self.listener.learn(outcome, self.learning_rate)
 
+        # Phase 16: KV memory write on significant events
+        concepts = self.brain.get_concepts()
+        surprise = getattr(self, '_last_surprise', 0.0)
+        if abs(reward) > 0.3 or surprise > 0.5 or abs(energy_gained) > 0.1:
+            self.kv_memory.write(concepts, concepts)
+
         if self.ticks_alive % 50 == 0 and self._hyp_rng is not None:
             self.concept_hyp.evolve(self._hyp_rng)
             self.hypotheses.evolve_hypotheses(self._hyp_rng)
             self.composable.evolve(self._hyp_rng)
+            # Phase 16: Prevent semantic collapse in token meanings
+            self.discrete_vocab.regularize_diversity()
 
         td_error = reward + self._cfg.discount_gamma * self._value - self._prev_value
         self._apply_td_update(td_error)
 
-        brain_cost = self._cfg.brain_metabolic_cost * self.brain.param_count
+        brain_cost = 0.00018 * np.sqrt(self.brain.param_count)  # Phase 16: sqrt scaling
         meta_cost = self._cfg.brain_metabolic_cost * self.meta_concepts.param_count
         tom_cost = self._cfg.brain_metabolic_cost * self.tom.param_count
         episodic_cost = self.episodic.capacity * 0.00005
@@ -857,8 +880,9 @@ class Agent:
         goal_cost = self.goals.max_depth * 0.0003
         workspace_cost = self.workspace.n_slots * 0.0003
         norm_cost = self.norms.capacity * 0.0001
+        kv_cost = self.kv_memory.capacity * 0.0001  # Phase 16
         branch_cost = max(0, self._think_branch_count - 1) * self._cfg.think_energy_cost * self._think_steps_used
-        brain_cost += meta_cost + tom_cost + episodic_cost + naming_cost + goal_cost + workspace_cost + norm_cost + branch_cost
+        brain_cost += meta_cost + tom_cost + episodic_cost + naming_cost + goal_cost + workspace_cost + norm_cost + kv_cost + branch_cost
         morph_cost = self.morphology.total_metabolic_cost
         think_cost = self._think_steps_used * self._cfg.think_energy_cost
 

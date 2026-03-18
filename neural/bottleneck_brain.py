@@ -11,10 +11,10 @@ def decode_bottleneck_architecture(arch_genes: np.ndarray, concept_genes: np.nda
     n_layers = int(np.clip(round(arch_genes[0]), 1, 4))
     layer_sizes = []
     for i in range(n_layers):
-        size = int(np.clip(round(arch_genes[1 + i]), 8, 256))
+        size = int(np.clip(round(arch_genes[1 + i]), 8, 1024))  # Phase 16: up from 256
         size = max(8, (size // 4) * 4)
         layer_sizes.append(size)
-    gru_size = int(np.clip(round(arch_genes[5]), 4, 128))
+    gru_size = int(np.clip(round(arch_genes[5]), 4, 768))  # Phase 16: up from 128
     gru_size = max(4, (gru_size // 4) * 4)
 
     bottleneck_size = int(np.clip(round(concept_genes[0]), MIN_BOTTLENECK, MAX_BOTTLENECK))
@@ -195,79 +195,79 @@ class BottleneckBrain:
               depth_gate_threshold: float = 0.0,
               branch_count: int = 1,
               workspace=None) -> tuple[np.ndarray, float, int]:
+        """Phase 16: True sequential rollout planning.
+        Each branch rolls out a full trajectory — GRU state chains forward,
+        step N's output feeds step N+1. Only the first action is returned."""
         actions, value = self.forward(raw_input, context)
         steps_used = 0
 
         if self.think_steps <= 0:
             return actions, value, steps_used
 
-        best_action = actions.copy()
-        best_value = value
+        best_first_action = actions.copy()
+        best_trajectory_value = value
         concepts = self._last_bottleneck.copy()
         branch_count = max(1, int(branch_count))
 
-        # Save GRU state — thinking happens in a sandbox
         saved_hidden = self.gru.h.copy()
 
         ctx = np.zeros(self.context_dim)
         n = min(len(context), self.context_dim)
         ctx[:n] = context[:n]
+        discount = 0.9
 
-        for step in range(self.think_steps):
-            noise_scale = 0.3 / (1 + step)
+        for _branch in range(branch_count):
+            # Each branch: roll out a full trajectory
+            rollout_concepts = concepts.copy()
+            self.gru.h = saved_hidden.copy()
+            trajectory_value = 0.0
+            first_action = None
+            current_actions = actions.copy()
 
-            step_best_action = best_action.copy()
-            step_best_value = best_value
-            step_best_next = None
-
-            # Branching: explore N candidates per step
-            for _branch in range(branch_count):
-                candidate = best_action + np.random.randn(self.action_dim) * noise_scale
+            for step in range(self.think_steps):
+                noise_scale = 0.3 / (1 + step)
+                candidate = current_actions + np.random.randn(self.action_dim) * noise_scale
                 candidate = np.clip(candidate, -1, 1)
 
-                # Imagine next concepts from current concepts + candidate action
-                imagined_next = self.imagine_step(concepts, candidate)
+                if step == 0:
+                    first_action = candidate.copy()
 
-                # RECURSIVE: pass imagined concepts through GRU (hidden updates)
-                self.gru.h = saved_hidden.copy()  # reset for fair comparison
-                imagined_input = np.concatenate([imagined_next, ctx])
-                gru_out = self.gru.forward(imagined_input)
+                # Predict next state
+                imagined_next = self.imagine_step(rollout_concepts, candidate)
 
-                # Evaluate value from the recursively updated hidden state
-                imagined_value = float(self.value_layer.forward(gru_out)[0])
+                # GRU state carries forward within branch — true sequential planning
+                gru_out = self.gru.forward(np.concatenate([imagined_next, ctx]))
+                step_value = float(self.value_layer.forward(gru_out)[0])
 
-                confidence_bonus = 0.1 * (1.0 - min(1.0, self.world_prediction_error))
-                imagined_value += confidence_bonus
+                # Accumulate discounted value
+                trajectory_value += (discount ** step) * step_value
 
-                if imagined_value > step_best_value:
-                    step_best_value = imagined_value
-                    step_best_action = candidate
-                    step_best_next = imagined_next
+                # Chain: use predicted state + policy output for next step
+                rollout_concepts = imagined_next
+                current_actions = self.output_layer.forward(gru_out)
 
-            improvement = step_best_value - best_value
-            if step_best_value > best_value:
-                best_value = step_best_value
-                best_action = step_best_action
-                # Use imagined concepts for next depth level
-                concepts = step_best_next
-                # Workspace: write productive imagination results
-                if workspace is not None and workspace.n_slots > 0:
-                    workspace.write(concepts, step_best_next, 0.5)
-            steps_used += 1
+                steps_used = max(steps_used, step + 1)
 
-            # Depth gate: stop if improvement is below threshold and not first step
-            if step > 0 and improvement < depth_gate_threshold:
-                break
+            # Normalize and add confidence bonus
+            trajectory_value /= max(1, self.think_steps)
+            confidence_bonus = 0.1 * (1.0 - min(1.0, self.world_prediction_error))
+            trajectory_value += confidence_bonus
+
+            if trajectory_value > best_trajectory_value:
+                best_trajectory_value = trajectory_value
+                best_first_action = first_action
+
+            if workspace is not None and workspace.n_slots > 0:
+                workspace.write(concepts, rollout_concepts, 0.5)
 
         # Restore GRU state — thinking was a sandbox
         self.gru.h = saved_hidden
         self._last_hidden = saved_hidden
 
-        # Store thought metadata for self-model
         self._thought_depth = steps_used
-        self._thought_value_delta = best_value - value
+        self._thought_value_delta = best_trajectory_value - value
 
-        return best_action, best_value, steps_used
+        return best_first_action, best_trajectory_value, steps_used
 
     def learn_world_model(self, new_bottleneck: np.ndarray):
         if self._wm_update_count == 0 and np.all(self._last_wm_prediction == 0):

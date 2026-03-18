@@ -730,6 +730,31 @@ def main():
                 agent._pending_positive_interaction += 0.2
                 agent._pending_social_reward += 0.05
 
+                # Phase 16: Cross-agent symbol grounding
+                # Listener learns speaker's intended meaning, speaker learns what listener understood
+                speaker_concepts = speaker.brain.get_concepts()
+                grounding_lr = getattr(agent, '_grounding_lr', 0.01)
+                if hasattr(agent, 'discrete_vocab') and agent._heard_tokens is not None:
+                    # Project speaker concepts to listener's bottleneck dimension
+                    l_bn = agent.bottleneck_size
+                    sc_proj = np.zeros(l_bn, dtype=np.float64)
+                    sc_n = min(len(speaker_concepts), l_bn)
+                    sc_proj[:sc_n] = speaker_concepts[:sc_n]
+                    for tid in agent._heard_tokens.tokens:
+                        agent.discrete_vocab.ground_listener(
+                            int(tid), sc_proj, True, lr=grounding_lr * 0.3)
+                    listener_decoded = agent.discrete_vocab.decode_utterance(
+                        agent._heard_tokens.tokens)
+                    if listener_decoded is not None and hasattr(speaker, 'discrete_vocab'):
+                        # Project listener decoded to speaker's bottleneck dimension
+                        s_bn = speaker.bottleneck_size
+                        ld_proj = np.zeros(s_bn, dtype=np.float64)
+                        ld_n = min(len(listener_decoded), s_bn)
+                        ld_proj[:ld_n] = listener_decoded[:ld_n]
+                        for tid in agent._heard_tokens.tokens:
+                            speaker.discrete_vocab.ground_speaker(
+                                int(tid), ld_proj, lr=grounding_lr * 0.2)
+
         # Disaster communication reward: sharing warnings saves lives
         # Agents who hear tokens in disaster zones get survival bonus,
         # speakers who warned get large reward — makes communication evolutionary useful
