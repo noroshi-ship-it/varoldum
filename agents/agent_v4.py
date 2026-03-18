@@ -13,6 +13,12 @@ from agents.composable_rules import ComposableRuleSystem
 from agents.symbol_system import SymbolCodebook
 from agents.discrete_language import DiscreteVocab
 from agents.inventory import Inventory, TrustMemory
+from agents.meta_concepts import MetaConceptSystem
+from agents.grammar import GrammarSystem
+from agents.theory_of_mind import TheoryOfMindSystem
+from agents.episodic_memory import EpisodicMemorySystem
+from agents.naming import NamingSystem
+from agents.goal_system import GoalSystem
 from agents.genome import (
     get_trait, get_nn_weights, get_arch_genes, get_morph_genes,
     get_concept_genes, random_genome, FIXED_GENE_COUNT
@@ -117,6 +123,72 @@ class Agent:
             self.bottleneck_size, mortality_sensitivity=mortality_sensitivity,
         )
 
+        # Phase 6: Meta-concepts
+        meta_window = int(round(get_trait(genome, "meta_window")))
+        meta_bn_size = int(round(get_trait(genome, "meta_bottleneck_size")))
+        meta_wm_lr = get_trait(genome, "meta_wm_lr")
+        self.meta_concepts = MetaConceptSystem(
+            self.bottleneck_size, meta_window=meta_window,
+            meta_bottleneck_size=meta_bn_size, meta_wm_lr=meta_wm_lr,
+            action_dim=cfg.action_dim,
+        )
+
+        # Phase 7: Compositional grammar
+        n_grammar_slots = int(round(get_trait(genome, "n_grammar_slots")))
+        grammar_lr = get_trait(genome, "grammar_lr")
+        grammar_weight = get_trait(genome, "grammar_weight")
+        self.grammar = GrammarSystem(
+            self.bottleneck_size, n_slots=n_grammar_slots,
+            grammar_lr=grammar_lr, grammar_weight=grammar_weight,
+        )
+
+        # Phase 8: Theory of Mind
+        tom_max = int(round(get_trait(genome, "tom_max_tracked")))
+        tom_window = int(round(get_trait(genome, "tom_window")))
+        tom_lr = get_trait(genome, "tom_lr")
+        tom_weight = get_trait(genome, "tom_weight")
+        self.tom = TheoryOfMindSystem(
+            self.bottleneck_size, tom_max_tracked=tom_max,
+            tom_window=tom_window, tom_lr=tom_lr, tom_weight=tom_weight,
+            action_dim=cfg.action_dim,
+        )
+
+        # Phase 9: Episodic memory
+        episodic_cap = int(round(get_trait(genome, "episodic_capacity")))
+        surprise_thresh = get_trait(genome, "episode_surprise_threshold")
+        consolidation = get_trait(genome, "consolidation_rate")
+        emotion_weight = get_trait(genome, "episodic_emotion_weight")
+        self.episodic = EpisodicMemorySystem(
+            capacity=episodic_cap, bottleneck_size=self.bottleneck_size,
+            action_dim=cfg.action_dim, surprise_threshold=surprise_thresh,
+            consolidation_rate=consolidation, emotion_weight=emotion_weight,
+        )
+        self._episodic_replay_depth = int(round(get_trait(genome, "episodic_replay_depth")))
+
+        # Phase 10: Naming/Reference
+        name_cap = int(round(get_trait(genome, "name_capacity")))
+        name_lr = get_trait(genome, "name_learning_rate")
+        ref_weight = get_trait(genome, "referential_weight")
+        self.naming = NamingSystem(
+            capacity=name_cap, bottleneck_size=self.bottleneck_size,
+            learning_rate=name_lr, referential_weight=ref_weight,
+        )
+        self._attended_entity = None  # (entity_type, entity_id) or None
+
+        # Phase 12: Persistent goals
+        goal_depth = int(round(get_trait(genome, "goal_stack_depth")))
+        commitment = get_trait(genome, "commitment_strength")
+        patience = get_trait(genome, "patience")
+        horizon = get_trait(genome, "goal_horizon")
+        goal_comm = get_trait(genome, "goal_communication_weight")
+        self.goals = GoalSystem(
+            max_depth=goal_depth, commitment_strength=commitment,
+            patience=patience, horizon=horizon,
+            communication_weight=goal_comm,
+            bottleneck_size=self.bottleneck_size,
+            action_dim=cfg.action_dim,
+        )
+
         # Phase 5: Society engine
         inv_capacity = int(round(get_trait(genome, "inventory_capacity")))
         self.inventory = Inventory(
@@ -166,6 +238,7 @@ class Agent:
         self._heard_signal = np.zeros(cfg.signal_dim)
         self._heard_tokens = None  # TokenUtterance or None
         self._last_spoken_tokens = None  # np.ndarray or None
+        self._last_structured_utterance = None  # StructuredUtterance or None
 
     def _ensure_systems(self, rng):
         if len(self.concept_hyp.hypotheses) == 0:
@@ -305,6 +378,26 @@ class Agent:
             # Blend inscription knowledge into heard meaning
             heard_meaning = heard_meaning + insc_sum * 0.5
 
+        # Phase 6: Meta-concept summary
+        meta_vec = self.meta_concepts.get_meta_summary(max_dim=16)
+
+        # Phase 8: Theory of Mind summary
+        tom_vec = self.tom.get_tom_summary(max_dim=4)
+
+        # Phase 9: Episodic memory context
+        concepts_for_query = self.brain.get_concepts() if hasattr(self.brain, '_last_bottleneck') else np.zeros(self.bottleneck_size)
+        emotional_valence = float(np.sum(np.abs(self.internal.as_vector() - 0.5)))
+        episodic_vec = self.episodic.get_context_vector(
+            concepts_for_query, emotional_valence, self.ticks_alive, max_dim=8)
+
+        # Phase 10: Naming/referent context
+        att_type = self._attended_entity[0] if self._attended_entity else None
+        att_id = self._attended_entity[1] if self._attended_entity else None
+        referent_vec = self.naming.get_referent_context(att_type, att_id, max_dim=4)
+
+        # Phase 12: Goal context
+        goal_vec = self.goals.get_goal_context(max_dim=6)
+
         self._context = np.concatenate([
             self.body.get_proprioception(),
             self.internal.as_vector(),
@@ -315,6 +408,11 @@ class Agent:
             mortality_vec,
             heard_meaning[:min(4, len(heard_meaning))],  # first 4 dims of decoded meaning
             self._disaster_warnings,  # 4 dims: tremor, flood, drought, plague
+            meta_vec,   # 16 dims: meta-concepts (padded)
+            tom_vec,    # 4 dims: ToM prediction of most-attended other
+            episodic_vec,  # 8 dims: episodic memory context
+            referent_vec,  # 4 dims: naming/referent context
+            goal_vec,      # 6 dims: goal context
         ])
         return self._context
 
@@ -328,6 +426,10 @@ class Agent:
         self._value = value
         self._action = actions.copy()
         self._think_steps_used = 0
+
+        # Phase 6: Record concepts into meta-concept buffer (GPU path)
+        self.meta_concepts.record_concepts(concepts)
+        self.meta_concepts.encode_meta()
 
         # Phase 1: Quantize concepts into discrete symbols
         self.symbols.quantize(concepts)
@@ -355,6 +457,10 @@ class Agent:
 
         concepts = self.brain.get_concepts()
 
+        # Phase 6: Record concepts into meta-concept buffer and encode
+        self.meta_concepts.record_concepts(concepts)
+        self.meta_concepts.encode_meta()
+
         # Phase 1: Quantize concepts into discrete symbols
         self.symbols.quantize(concepts)
         self.symbols.learn(concepts)
@@ -369,7 +475,11 @@ class Agent:
         cb = concept_bias[:n] if len(concept_bias) >= n else np.pad(concept_bias, (0, n - len(concept_bias)))
         cpb = comp_bias[:n] if len(comp_bias) >= n else np.pad(comp_bias, (0, n - len(comp_bias)))
 
-        self._action = np.tanh(self._action + cb * 0.4 + cpb * 0.3)
+        # Phase 12: Goal action bias
+        goal_bias = self.goals.get_action_bias(concepts)
+        gb = goal_bias[:n] if len(goal_bias) >= n else np.pad(goal_bias, (0, n - len(goal_bias)))
+
+        self._action = np.tanh(self._action + cb * 0.4 + cpb * 0.3 + gb * 0.3)
 
         return self._action
 
@@ -395,9 +505,44 @@ class Agent:
         # Signal strength determines if/how much the agent broadcasts
         signal_strength = (signal_raw + 1) / 2 * self.morphology.visibility
         concepts = self.brain.get_concepts()
-        token_utterance = self.discrete_vocab.encode_utterance(concepts, signal_raw)
+
+        # Phase 12: Blend goal signal into concepts for utterance
+        goal_signal = self.goals.get_goal_signal()
+        if np.any(goal_signal != 0):
+            n_gs = min(len(concepts), len(goal_signal))
+            concepts_for_utt = concepts.copy()
+            concepts_for_utt[:n_gs] = concepts[:n_gs] * 0.7 + goal_signal[:n_gs] * 0.3
+        else:
+            concepts_for_utt = concepts
+
+        # Phase 10: Get referent token for naming
+        referent_token = None
+        if self._attended_entity is not None:
+            referent_token = self.naming.encode_referent(
+                self._attended_entity[0], self._attended_entity[1])
+
+        # Phase 7: Blend structured grammar with flat token encoding
+        gw = self.grammar.grammar_weight
+        token_utterance = None
+        if gw > 0.5:
+            # Prefer structured utterance
+            token_utterance = self.grammar.encode_structured(
+                concepts_for_utt, signal_raw, self.discrete_vocab,
+                referent_token=referent_token,
+                referential_weight=self.naming.referential_weight)
+        if token_utterance is None:
+            # Fallback to flat encoding
+            token_utterance = self.discrete_vocab.encode_utterance(concepts, signal_raw)
+
         if token_utterance is not None:
-            self._last_spoken_tokens = token_utterance.copy()
+            # Store tokens for speaker grounding (always np.ndarray of token IDs)
+            if hasattr(token_utterance, 'tokens'):
+                self._last_spoken_tokens = token_utterance.tokens.copy()
+            elif hasattr(token_utterance, 'copy'):
+                self._last_spoken_tokens = token_utterance.copy()
+            else:
+                self._last_spoken_tokens = token_utterance
+        self._last_structured_utterance = token_utterance
 
         # Utterance vector: concepts modulated by signal
         utterance = concepts[:self._cfg.signal_dim] * signal_strength if len(concepts) >= self._cfg.signal_dim else np.zeros(self._cfg.signal_dim)
@@ -462,6 +607,70 @@ class Agent:
 
         self.brain.learn_world_model(self.brain.get_concepts())
 
+        # === Phase 6: Meta-concept learning ===
+        meta_encoded = self.meta_concepts.encode_meta()
+        self.meta_concepts.predict_next_meta(self._action)
+        self.meta_concepts.learn_meta_wm(meta_encoded)
+        # Meta-concept accuracy reward
+        meta_acc = self.meta_concepts.cumulative_accuracy
+        if meta_acc > 0.3:
+            reward += meta_acc * 0.02
+
+        # === Phase 7: Grammar grounding ===
+        if hasattr(self, '_last_structured_utterance') and self._last_structured_utterance is not None:
+            utt = self._last_structured_utterance
+            concepts_now = self.brain.get_concepts()
+            if hasattr(utt, 'roles'):
+                for slot_idx in range(min(len(utt.roles), self.grammar.n_slots)):
+                    self.grammar.ground_speaker_roles(
+                        int(utt.roles[slot_idx]), concepts_now, self.learning_rate)
+            self._last_structured_utterance = None
+
+        # === Phase 8: Theory of Mind update ===
+        if self.ticks_alive % 5 == 0:
+            proximity_map = {}
+            self.tom.update_attention(self._bonds, proximity_map, self.ticks_alive)
+        # ToM accuracy reward
+        tom_acc = self.tom.cumulative_accuracy
+        if tom_acc > 0.3:
+            reward += tom_acc * 0.02
+
+        # === Phase 9: Episodic memory ===
+        concepts_now = self.brain.get_concepts()
+        emotional_val = float(np.sum(np.abs(self.internal.as_vector() - 0.5)))
+        nearby_ids = [aid for aid in self._bonds.keys()][:3]
+        self.episodic.maybe_store(
+            concepts_now, self.body.position, self.ticks_alive,
+            self.internal.as_vector(), nearby_ids, self._action,
+            reward, self.self_model.surprise,
+        )
+        if self.ticks_alive % 50 == 0:
+            self.episodic.consolidate(self.ticks_alive)
+
+        # === Phase 10: Naming decay ===
+        if self.ticks_alive % 20 == 0:
+            self.naming.decay(self.ticks_alive)
+
+        # === Phase 12: Goal progress update ===
+        self.goals.update_progress(concepts_now, reward, self.ticks_alive)
+        if self.body.health < 0.15:
+            self.goals.abandon_all()
+        # Goal selection every 20 ticks
+        if self.ticks_alive % 20 == 0 and self.goals.max_depth > 0:
+            episodic_targets = []
+            top_episodes = self.episodic.retrieve(
+                concepts_now, emotional_val, self.ticks_alive, top_k=2)
+            for ep in top_episodes:
+                if ep.outcome > 0:
+                    episodic_targets.append(ep.concepts)
+            self.goals.select_goal(
+                self.internal.as_vector(), concepts_now,
+                episodic_targets=episodic_targets if episodic_targets else None,
+            )
+        # Goal completion reward
+        if self.goals.check_and_clear_completion():
+            reward += 0.5
+
         # === DAYDREAM / INSPIRATION ===
         # Curiosity + boredom drives aimless imagination.
         # Low surprise = world is predictable = boring = time to daydream.
@@ -496,6 +705,19 @@ class Agent:
             for tid in self._heard_tokens.tokens:
                 self.discrete_vocab.ground_listener(
                     int(tid), concepts, outcome_good, lr=self.learning_rate * 0.5)
+            # Phase 7: Grammar listener grounding
+            if hasattr(self._heard_tokens, 'roles'):
+                for slot_idx in range(min(len(self._heard_tokens.roles), self.grammar.n_slots)):
+                    self.grammar.ground_listener_roles(
+                        int(self._heard_tokens.roles[slot_idx]), concepts,
+                        outcome_good, lr=self.learning_rate * 0.5)
+            # Phase 10: Naming grounding — try to ground heard tokens to attended entity
+            if self._attended_entity is not None:
+                att_type, att_id = self._attended_entity
+                for tid in self._heard_tokens.tokens:
+                    self.naming.attempt_grounding(
+                        int(tid), att_id, att_type,
+                        concepts, self.body.position, self.ticks_alive)
             self._heard_tokens = None
 
         experience = np.concatenate([self._raw_input, self.body.get_proprioception()])
@@ -542,6 +764,12 @@ class Agent:
         self._apply_td_update(td_error)
 
         brain_cost = self._cfg.brain_metabolic_cost * self.brain.param_count
+        meta_cost = self._cfg.brain_metabolic_cost * self.meta_concepts.param_count
+        tom_cost = self._cfg.brain_metabolic_cost * self.tom.param_count
+        episodic_cost = self.episodic.capacity * 0.00005
+        naming_cost = self.naming.capacity * 0.00002
+        goal_cost = self.goals.max_depth * 0.0003
+        brain_cost += meta_cost + tom_cost + episodic_cost + naming_cost + goal_cost
         morph_cost = self.morphology.total_metabolic_cost
         think_cost = self._think_steps_used * self._cfg.think_energy_cost
 
@@ -675,6 +903,70 @@ class Agent:
             if i < len(self.concept_hyp.hypotheses):
                 self.concept_hyp.hypotheses[i] = self.concept_hyp._mutate(hyp, rng)
 
+    def inherit_grammar(self, parent_agent, rng):
+        """Inherit grammar role embeddings from parent with small mutation."""
+        n = min(self.grammar.n_slots, parent_agent.grammar.n_slots)
+        bn = min(self.grammar.bottleneck_size, parent_agent.grammar.bottleneck_size)
+        for i in range(n):
+            self.grammar.role_embeddings[i, :bn] = parent_agent.grammar.role_embeddings[i, :bn].copy()
+            # Small mutation
+            if rng.random() < 0.3:
+                self.grammar.role_embeddings[i] += rng.normal(0, 0.05, size=self.grammar.bottleneck_size)
+                norm = np.linalg.norm(self.grammar.role_embeddings[i])
+                if norm > 1e-8:
+                    self.grammar.role_embeddings[i] /= norm
+
+    def inherit_meta_concepts(self, parent_agent, rng):
+        """Inherit meta-concept encoder weights with mutation."""
+        # Copy encoder weights if dimensions match
+        if (self.meta_concepts._encoder.W.shape == parent_agent.meta_concepts._encoder.W.shape):
+            self.meta_concepts._encoder.W[:] = parent_agent.meta_concepts._encoder.W
+            self.meta_concepts._encoder.b[:] = parent_agent.meta_concepts._encoder.b
+            mask = rng.random(self.meta_concepts._encoder.W.shape) < 0.1
+            self.meta_concepts._encoder.W[mask] += rng.normal(0, 0.05, size=mask.sum())
+
+    def inherit_tom(self, parent_agent, rng):
+        """Inherit Theory of Mind network weights with mutation."""
+        if (self.tom._hidden_layer.W.shape == parent_agent.tom._hidden_layer.W.shape):
+            self.tom._hidden_layer.W[:] = parent_agent.tom._hidden_layer.W
+            self.tom._hidden_layer.b[:] = parent_agent.tom._hidden_layer.b
+            self.tom._output_layer.W[:] = parent_agent.tom._output_layer.W
+            self.tom._output_layer.b[:] = parent_agent.tom._output_layer.b
+            mask = rng.random(self.tom._hidden_layer.W.shape) < 0.1
+            self.tom._hidden_layer.W[mask] += rng.normal(0, 0.05, size=mask.sum())
+
+    def inherit_episodic(self, parent_agent, rng):
+        """Inherit top episodic memories from parent (compressed)."""
+        if not parent_agent.episodic.episodes:
+            return
+        # Inherit top-3 highest-outcome episodes as compressed gist
+        sorted_eps = sorted(parent_agent.episodic.episodes,
+                            key=lambda e: e.outcome, reverse=True)
+        for ep in sorted_eps[:3]:
+            if ep.outcome > 0 and len(self.episodic.episodes) < self.episodic.capacity:
+                from agents.episodic_memory import Episode
+                child_ep = Episode(
+                    ep.concepts, ep.position, ep.tick,
+                    ep.emotional_valence, [], ep.action_taken, ep.outcome,
+                    ep.surprise)
+                child_ep.detail_level = 0.3  # inherited memories are vague
+                self.episodic.episodes.append(child_ep)
+
+    def inherit_naming(self, parent_agent, rng):
+        """Inherit strongest name bindings from parent."""
+        sorted_names = sorted(parent_agent.naming.name_registry.values(),
+                              key=lambda b: b.strength, reverse=True)
+        for binding in sorted_names[:self.naming.capacity]:
+            if rng.random() < binding.strength:
+                self.naming.assign_name(
+                    binding.token_id, binding.entity_type, binding.entity_id,
+                    binding.concept_signature, binding.last_seen_pos,
+                    binding.last_seen_tick)
+
+    def inherit_goals_template(self, parent_agent, rng):
+        """Inherit goal-setting tendencies (no active goals, just parameters already in genome)."""
+        pass  # Goal system parameters are gene-controlled, no learned state to inherit
+
     @property
     def is_alive(self):
         return self.body.is_alive()
@@ -692,7 +984,7 @@ class Agent:
         from neural.bottleneck_brain import BottleneckBrain
         max_arch = np.array([4, 256, 256, 128, 64, 128])
         max_concept = np.array([32, 8, 0.05])
-        extra = 9
+        extra = 9  # max extra_sensor_dim from morphology
         context_dim = cfg.context_dim + cfg.internal_state_dim + extra
         brain = BottleneckBrain(RAW_INPUT_DIM, context_dim, cfg.action_dim,
                                 max_arch, max_concept)

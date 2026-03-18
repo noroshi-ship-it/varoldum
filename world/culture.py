@@ -1,5 +1,6 @@
 
 import numpy as np
+from agents.genome import get_trait
 
 
 class CulturalEvent:
@@ -122,6 +123,11 @@ class CultureSystem:
                                 teacher.generation, tick,
                             )
 
+                    # Teaching investment: higher investment = better fidelity but costs energy
+                    teaching_inv = get_trait(teacher.genome, 'teaching_investment')
+                    teach_cost = 0.02 * teaching_inv
+                    teacher.body.energy = max(0.0, teacher.body.energy - teach_cost)
+
                     # Teacher gets major reward — teaching is the highest-value social act
                     if hasattr(teacher, '_pending_social_reward'):
                         teacher._pending_social_reward += 0.8
@@ -211,6 +217,49 @@ class CultureSystem:
                 self._tick_events.append(CulturalEvent(
                     "imitate", best_neighbor.id, agent.id, "", tick
                 ))
+
+    def process_structure_learning(self, agents: list, structure_manager,
+                                   tick: int, rng: np.random.Generator):
+        """Agents at MARKER/STORAGE structures can absorb inscribed rules."""
+        from world.structures import StructureType
+
+        for agent in agents:
+            if not agent.is_alive:
+                continue
+
+            cultural_receptivity = get_trait(agent.genome, 'cultural_receptivity')
+            if cultural_receptivity < 0.1:
+                continue
+
+            # Only check every 10 ticks to save performance
+            if (agent.id + tick) % 10 != 0:
+                continue
+
+            ax, ay = int(agent.x), int(agent.y)
+            s = structure_manager.get_at(ax, ay)
+            if s is None:
+                continue
+            if s.stype not in (StructureType.MARKER, StructureType.STORAGE):
+                continue
+            if not s.inscriptions:
+                continue
+
+            # Try to learn from a random inscription with rule_data
+            inscriptions_with_rules = [insc for insc in s.inscriptions if insc.rule_data is not None]
+            if not inscriptions_with_rules:
+                continue
+
+            insc = rng.choice(inscriptions_with_rules)
+            success_chance = cultural_receptivity * (insc.use_count * 0.05 + 0.5) * 0.1
+
+            if rng.random() < success_chance:
+                if hasattr(agent.hypotheses, 'decode_and_replace_worst'):
+                    agent.hypotheses.decode_and_replace_worst(insc.rule_data)
+                    insc.use_count += 1
+                    self._tick_events.append(CulturalEvent(
+                        "structure_learn", insc.author_lineage,
+                        agent.id, "", tick
+                    ))
 
     def cleanup(self):
         if len(self.events) > 5000:

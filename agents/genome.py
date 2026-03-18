@@ -71,7 +71,54 @@ SOCIETY_LOCI = {
     "nostalgia_sensitivity":    (SOCIETY_OFFSET + 7, 0.0, 2.0),
 }
 
-FIXED_GENE_COUNT = NUM_TRAIT_GENES + ARCH_COUNT + MORPH_COUNT + CONCEPT_COUNT + ABSTRACT_COUNT + SOCIETY_COUNT
+# Meta-cognition genes (Phase 6-8)
+META_OFFSET = SOCIETY_OFFSET + SOCIETY_COUNT  # 47
+META_COUNT = 10
+
+META_LOCI = {
+    # Phase 6: Meta-concepts
+    "meta_window":          (META_OFFSET + 0, 4.0, 16.0),
+    "meta_bottleneck_size": (META_OFFSET + 1, 2.0, 16.0),
+    "meta_wm_lr":           (META_OFFSET + 2, 0.001, 0.05),
+    # Phase 7: Compositional grammar
+    "n_grammar_slots":      (META_OFFSET + 3, 2.0, 5.0),
+    "grammar_lr":           (META_OFFSET + 4, 0.001, 0.05),
+    "grammar_weight":       (META_OFFSET + 5, 0.0, 1.0),
+    # Phase 8: Theory of Mind
+    "tom_max_tracked":      (META_OFFSET + 6, 2.0, 6.0),
+    "tom_window":           (META_OFFSET + 7, 4.0, 12.0),
+    "tom_lr":               (META_OFFSET + 8, 0.001, 0.05),
+    "tom_weight":           (META_OFFSET + 9, 0.0, 1.0),
+}
+
+# Cognitive genes (Phase 9-12): Episodic memory, Naming, Culture, Goals
+COGNITIVE_OFFSET = META_OFFSET + META_COUNT  # 57
+COGNITIVE_COUNT = 16
+
+COGNITIVE_LOCI = {
+    # Phase 9: Episodic memory
+    "episodic_capacity":          (COGNITIVE_OFFSET + 0, 4.0, 32.0),
+    "episode_surprise_threshold": (COGNITIVE_OFFSET + 1, 0.1, 0.8),
+    "episodic_replay_depth":      (COGNITIVE_OFFSET + 2, 0.0, 3.0),
+    "consolidation_rate":         (COGNITIVE_OFFSET + 3, 0.01, 0.2),
+    # Phase 10: Naming/Reference
+    "name_capacity":              (COGNITIVE_OFFSET + 4, 2.0, 16.0),
+    "name_learning_rate":         (COGNITIVE_OFFSET + 5, 0.005, 0.05),
+    "referential_weight":         (COGNITIVE_OFFSET + 6, 0.0, 1.0),
+    # Phase 11: Cumulative culture
+    "cultural_receptivity":       (COGNITIVE_OFFSET + 7, 0.0, 2.0),
+    "innovation_drive":           (COGNITIVE_OFFSET + 8, 0.0, 2.0),
+    "teaching_investment":        (COGNITIVE_OFFSET + 9, 0.0, 2.0),
+    # Phase 12: Persistent goals
+    "goal_stack_depth":           (COGNITIVE_OFFSET + 10, 0.0, 4.0),
+    "commitment_strength":        (COGNITIVE_OFFSET + 11, 0.0, 2.0),
+    "patience":                   (COGNITIVE_OFFSET + 12, 10.0, 200.0),
+    "goal_horizon":               (COGNITIVE_OFFSET + 13, 0.0, 1.0),
+    "goal_communication_weight":  (COGNITIVE_OFFSET + 14, 0.0, 1.0),
+    "episodic_emotion_weight":    (COGNITIVE_OFFSET + 15, 0.0, 2.0),
+}
+
+FIXED_GENE_COUNT = NUM_TRAIT_GENES + ARCH_COUNT + MORPH_COUNT + CONCEPT_COUNT + ABSTRACT_COUNT + SOCIETY_COUNT + META_COUNT + COGNITIVE_COUNT
 
 
 def random_genome(cfg: Config, max_nn_params: int, rng: np.random.Generator) -> np.ndarray:
@@ -114,6 +161,36 @@ def random_genome(cfg: Config, max_nn_params: int, rng: np.random.Generator) -> 
     genes[SOCIETY_OFFSET + 6] = rng.uniform(2.0, 4.0)     # inventory_capacity
     genes[SOCIETY_OFFSET + 7] = rng.uniform(0.5, 1.5)     # nostalgia_sensitivity
 
+    # Meta-cognition genes (Phase 6-8)
+    genes[META_OFFSET + 0] = rng.uniform(4.0, 8.0)        # meta_window
+    genes[META_OFFSET + 1] = rng.uniform(2.0, 8.0)        # meta_bottleneck_size
+    genes[META_OFFSET + 2] = rng.uniform(0.005, 0.02)     # meta_wm_lr
+    genes[META_OFFSET + 3] = rng.uniform(2.0, 3.0)        # n_grammar_slots
+    genes[META_OFFSET + 4] = rng.uniform(0.005, 0.02)     # grammar_lr
+    genes[META_OFFSET + 5] = rng.uniform(0.0, 0.3)        # grammar_weight (start low)
+    genes[META_OFFSET + 6] = rng.uniform(2.0, 3.0)        # tom_max_tracked
+    genes[META_OFFSET + 7] = rng.uniform(4.0, 8.0)        # tom_window
+    genes[META_OFFSET + 8] = rng.uniform(0.005, 0.02)     # tom_lr
+    genes[META_OFFSET + 9] = rng.uniform(0.0, 0.3)        # tom_weight (start low)
+
+    # Cognitive genes (Phase 9-12)
+    genes[COGNITIVE_OFFSET + 0] = rng.uniform(4.0, 12.0)       # episodic_capacity
+    genes[COGNITIVE_OFFSET + 1] = rng.uniform(0.2, 0.5)        # episode_surprise_threshold
+    genes[COGNITIVE_OFFSET + 2] = rng.uniform(0.0, 1.0)        # episodic_replay_depth
+    genes[COGNITIVE_OFFSET + 3] = rng.uniform(0.02, 0.1)       # consolidation_rate
+    genes[COGNITIVE_OFFSET + 4] = rng.uniform(2.0, 6.0)        # name_capacity
+    genes[COGNITIVE_OFFSET + 5] = rng.uniform(0.01, 0.03)      # name_learning_rate
+    genes[COGNITIVE_OFFSET + 6] = rng.uniform(0.0, 0.3)        # referential_weight (start low)
+    genes[COGNITIVE_OFFSET + 7] = rng.uniform(0.0, 0.5)        # cultural_receptivity (start low)
+    genes[COGNITIVE_OFFSET + 8] = rng.uniform(0.0, 0.5)        # innovation_drive (start low)
+    genes[COGNITIVE_OFFSET + 9] = rng.uniform(0.0, 0.5)        # teaching_investment (start low)
+    genes[COGNITIVE_OFFSET + 10] = rng.uniform(0.0, 1.0)       # goal_stack_depth (start low)
+    genes[COGNITIVE_OFFSET + 11] = rng.uniform(0.0, 0.5)       # commitment_strength (start low)
+    genes[COGNITIVE_OFFSET + 12] = rng.uniform(20.0, 80.0)     # patience
+    genes[COGNITIVE_OFFSET + 13] = rng.uniform(0.0, 0.3)       # goal_horizon (start short-term)
+    genes[COGNITIVE_OFFSET + 14] = rng.uniform(0.0, 0.3)       # goal_communication_weight
+    genes[COGNITIVE_OFFSET + 15] = rng.uniform(0.0, 0.5)       # episodic_emotion_weight
+
     nn_start = FIXED_GENE_COUNT
     genes[nn_start:] = rng.standard_normal(max_nn_params) * 0.3
 
@@ -137,6 +214,10 @@ def get_trait(genome: np.ndarray, name: str) -> float:
         idx, lo, hi = ABSTRACT_LOCI[name]
     elif name in SOCIETY_LOCI:
         idx, lo, hi = SOCIETY_LOCI[name]
+    elif name in META_LOCI:
+        idx, lo, hi = META_LOCI[name]
+    elif name in COGNITIVE_LOCI:
+        idx, lo, hi = COGNITIVE_LOCI[name]
     else:
         raise KeyError(f"Unknown trait: {name}")
     return float(np.clip(genome[idx], lo, hi))
@@ -152,6 +233,14 @@ def get_morph_genes(genome: np.ndarray) -> np.ndarray:
 
 def get_nn_weights(genome: np.ndarray) -> np.ndarray:
     return genome[FIXED_GENE_COUNT:]
+
+
+def get_meta_genes(genome: np.ndarray) -> np.ndarray:
+    return genome[META_OFFSET:META_OFFSET + META_COUNT]
+
+
+def get_cognitive_genes(genome: np.ndarray) -> np.ndarray:
+    return genome[COGNITIVE_OFFSET:COGNITIVE_OFFSET + COGNITIVE_COUNT]
 
 
 def get_concept_genes(genome: np.ndarray) -> np.ndarray:
@@ -172,4 +261,8 @@ def clamp_genome(genome: np.ndarray):
     for name, (idx, lo, hi) in ABSTRACT_LOCI.items():
         genome[idx] = np.clip(genome[idx], lo, hi)
     for name, (idx, lo, hi) in SOCIETY_LOCI.items():
+        genome[idx] = np.clip(genome[idx], lo, hi)
+    for name, (idx, lo, hi) in META_LOCI.items():
+        genome[idx] = np.clip(genome[idx], lo, hi)
+    for name, (idx, lo, hi) in COGNITIVE_LOCI.items():
         genome[idx] = np.clip(genome[idx], lo, hi)

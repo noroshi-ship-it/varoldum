@@ -3,7 +3,8 @@ import numpy as np
 from agents.genome import (
     LOCI, NUM_TRAIT_GENES, ARCH_OFFSET, ARCH_COUNT,
     MORPH_OFFSET, MORPH_COUNT, ABSTRACT_OFFSET, ABSTRACT_COUNT,
-    SOCIETY_OFFSET, SOCIETY_COUNT,
+    SOCIETY_OFFSET, SOCIETY_COUNT, META_OFFSET, META_COUNT,
+    COGNITIVE_OFFSET, COGNITIVE_COUNT,
     FIXED_GENE_COUNT, clamp_genome
 )
 
@@ -41,6 +42,18 @@ def mutate(genome: np.ndarray, rng: np.random.Generator) -> np.ndarray:
     for i in range(SOCIETY_COUNT):
         if rng.random() < 0.3:
             idx = SOCIETY_OFFSET + i
+            child[idx] += rng.normal(0, mutation_rate * 2)
+
+    # Meta-cognition genes (Phase 6-8)
+    for i in range(META_COUNT):
+        if rng.random() < 0.3:
+            idx = META_OFFSET + i
+            child[idx] += rng.normal(0, mutation_rate * 2)
+
+    # Cognitive genes (Phase 9-12)
+    for i in range(COGNITIVE_COUNT):
+        if rng.random() < 0.3:
+            idx = COGNITIVE_OFFSET + i
             child[idx] += rng.normal(0, mutation_rate * 2)
 
     nn_start = FIXED_GENE_COUNT

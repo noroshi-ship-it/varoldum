@@ -93,6 +93,11 @@ class Config:
             + 3   # mortality: survival_prob, time_to_death, death_awareness
             + 4   # decoded token meaning (first 4 dims)
             + 4   # disaster warnings: tremor, flood, drought, plague
+            + 16  # meta-concepts (padded to max meta_bottleneck_size)
+            + 4   # theory of mind: predicted concepts of most-attended other
+            + 8   # episodic memory context
+            + 4   # naming/referent context
+            + 6   # goal context
         )
 
     @property

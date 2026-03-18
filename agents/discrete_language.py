@@ -142,6 +142,14 @@ class DiscreteVocab:
         }
 
 
+# Re-export StructuredUtterance for convenience
+# (StructuredUtterance is a subclass of TokenUtterance defined in grammar.py)
+# Import it here so callers can check isinstance without importing grammar.py
+def _is_structured(utterance) -> bool:
+    """Check if an utterance has grammatical role annotations."""
+    return hasattr(utterance, 'roles')
+
+
 class DiscreteLanguageSystem:
     """World-level system that manages token-based communication between agents."""
 

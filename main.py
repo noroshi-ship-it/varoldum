@@ -264,7 +264,9 @@ def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng, ec
             # Inscription: signal at structure = write
             if action.get("token_utterance") is not None:
                 concepts = agent.brain.get_concepts()
-                structures.inscribe(x, y, action["token_utterance"],
+                tok_utt = action["token_utterance"]
+                tok_arr = tok_utt.tokens if hasattr(tok_utt, 'tokens') else tok_utt
+                structures.inscribe(x, y, tok_arr,
                                     concepts, agent.lineage_id, tick)
         physics.stamp_scent(x, y, 0.3)
 
@@ -521,6 +523,60 @@ def main():
                           nearby_agents=nearby, heard_signal=heard,
                           ecology=ecology, structures=structures,
                           disasters=env.disasters)
+
+        # Phase 8: Theory of Mind + Phase 10: Naming — feed nearby agent observations
+        if tick % 3 == 0:  # every 3 ticks to save perf
+            for agent in agents:
+                if not agent.is_alive:
+                    continue
+                nearby_others = _spatial.query(agent.x, agent.y, 4)
+                best_other_id = None
+                best_priority = -1.0
+                for other in nearby_others:
+                    if other.id == agent.id or not other.is_alive:
+                        continue
+                    rel_pos = np.array([
+                        other.x - agent.x, other.y - agent.y
+                    ], dtype=np.float32)
+                    other_action = getattr(other, '_action', np.zeros(cfg.action_dim))
+                    other_signal = getattr(other, '_heard_signal', np.zeros(cfg.signal_dim))
+                    sig_strength = float(np.linalg.norm(other_signal))
+                    # Decode other's last utterance if available
+                    utt_decoded = np.zeros(4, dtype=np.float32)
+                    if hasattr(other, '_last_spoken_tokens') and other._last_spoken_tokens is not None:
+                        decoded = agent.discrete_vocab.decode_utterance(other._last_spoken_tokens)
+                        utt_decoded[:min(4, len(decoded))] = decoded[:min(4, len(decoded))]
+                    agent.tom.observe_other(
+                        other.id, rel_pos, other_action, sig_strength,
+                        utt_decoded, tick)
+
+                    # Phase 10: Update naming sightings for known entities
+                    other_concepts = other.brain.get_concepts()
+                    agent.naming.update_sighting(
+                        "agent", other.id, np.array([other.x, other.y]),
+                        other_concepts, tick)
+
+                    # Track highest-priority nearby agent for attended entity
+                    bond = agent._bonds.get(other.id, 0.0)
+                    dist = float(np.sqrt(rel_pos[0]**2 + rel_pos[1]**2))
+                    priority = bond * 0.5 + 1.0 / (1.0 + dist) * 0.5
+                    if priority > best_priority:
+                        best_priority = priority
+                        best_other_id = other.id
+
+                    # Auto-name bonded agents
+                    if bond > 0.3 and agent.naming.get_name_for_entity("agent", other.id) is None:
+                        # Pick a token not currently used as a name
+                        used_tokens = set(agent.naming.name_registry.keys())
+                        for tid in range(agent.discrete_vocab.vocab_active):
+                            if tid not in used_tokens:
+                                agent.naming.assign_name(
+                                    tid, "agent", other.id,
+                                    other_concepts, np.array([other.x, other.y]), tick)
+                                break
+
+                # Set attended entity for context
+                agent._attended_entity = ("agent", best_other_id) if best_other_id is not None else None
         t2 = time.time()
 
         if use_gpu:
@@ -561,9 +617,11 @@ def main():
                 # Phase 3: Discrete token broadcast
                 token_utt = action.get("token_utterance", None)
                 if token_utt is not None:
+                    # Extract tokens array — token_utt may be np.ndarray or StructuredUtterance
+                    tok_arr = token_utt.tokens if hasattr(token_utt, 'tokens') else token_utt
                     discrete_lang.broadcast(
                         agent.id, agent.body.position, agent.lineage_id,
-                        token_utt, tick)
+                        tok_arr, tick)
         language.cleanup(tick)
         discrete_lang.cleanup(tick)
 
@@ -686,10 +744,23 @@ def main():
                 agent._pending_social_reward += 0.3
             agent._was_in_danger = danger_here > 0.2
 
+        # Phase 8: ToM verification — compare predictions with observed actions
+        if tick % 3 == 0:
+            for agent in agents:
+                if not agent.is_alive:
+                    continue
+                for tracked_id in list(agent.tom._tracked.keys()):
+                    other = agent_by_id.get(tracked_id)
+                    if other is not None and other.is_alive:
+                        agent.tom.verify_prediction(
+                            tracked_id, getattr(other, '_action', np.zeros(cfg.action_dim)))
+
         if tick % 5 == 0:
             culture.process_teaching(agents, tick, agent_rng, lineage_memory=lineage_memory, actions=actions)
             culture.process_lineage_study(agents, lineage_memory, tick, agent_rng)
             culture.process_imitation(agents, tick, agent_rng)
+            # Phase 11: Structure-based cultural learning
+            culture.process_structure_learning(agents, structures, tick, agent_rng)
             culture.cleanup()
             # Cleanup extinct lineage pools
             active_lineages = {a.lineage_id for a in agents if a.is_alive}
@@ -971,8 +1042,56 @@ def main():
                 probes["generation"] = top.generation
                 logger.log_dict("consciousness", tick, probes)
 
+                # Phase 6-12: Cognition trace for top agents
+                for top_agent in sorted(agents, key=lambda a: a.total_reward, reverse=True)[:5]:
+                    meta_info = top_agent.meta_concepts.introspect()
+                    grammar_info = top_agent.grammar.stats
+                    tom_info = top_agent.tom.describe_beliefs()
+                    logger.log_dict("cognition_trace", tick, {
+                        "agent_id": top_agent.id,
+                        "generation": top_agent.generation,
+                        "meta_accuracy": meta_info["meta_wm_accuracy"],
+                        "meta_pattern": meta_info["pattern"],
+                        "meta_active_dims": meta_info["active_dims"],
+                        "grammar_weight": grammar_info["grammar_weight"],
+                        "grammar_differentiation": grammar_info["role_differentiation"],
+                        "grammar_slots": grammar_info["n_slots"],
+                        "tom_tracked": tom_info["tracked_count"],
+                        "tom_accuracy": tom_info["mean_accuracy"],
+                        # Phase 9-12 cognitive stats
+                        "episodic_count": top_agent.episodic.episode_count,
+                        "episodic_detail": top_agent.episodic.mean_detail_level,
+                        "named_entities": top_agent.naming.named_count,
+                        "has_goal": top_agent.goals.has_active_goal,
+                        "goal_progress": top_agent.goals.current_goal.progress if top_agent.goals.current_goal else 0.0,
+                    })
+
+                # Population-level language analysis
+                alive = [a for a in agents if a.is_alive]
+                if alive:
+                    mean_gw = float(np.mean([a.grammar.grammar_weight for a in alive]))
+                    mean_diff = float(np.mean([a.grammar.stats["role_differentiation"] for a in alive]))
+                    mean_tom = float(np.mean([a.tom.cumulative_accuracy for a in alive]))
+                    mean_meta = float(np.mean([a.meta_concepts.cumulative_accuracy for a in alive]))
+                    mean_episodic = float(np.mean([a.episodic.episode_count for a in alive]))
+                    mean_names = float(np.mean([a.naming.named_count for a in alive]))
+                    mean_goals = float(np.mean([1.0 if a.goals.has_active_goal else 0.0 for a in alive]))
+                    logger.log_dict("language_analysis", tick, {
+                        "mean_grammar_weight": mean_gw,
+                        "mean_role_differentiation": mean_diff,
+                        "mean_tom_accuracy": mean_tom,
+                        "mean_meta_accuracy": mean_meta,
+                        "mean_episodic_count": mean_episodic,
+                        "mean_named_entities": mean_names,
+                        "mean_has_goal": mean_goals,
+                        "pop_size": len(alive),
+                    })
+
                 if not args.quiet:
-                    print(f"  top=#{top.id} gen={top.generation} wm={top.brain.cumulative_wm_accuracy:.3f}")
+                    print(f"  top=#{top.id} gen={top.generation} wm={top.brain.cumulative_wm_accuracy:.3f}"
+                          f" meta={top.meta_concepts.cumulative_accuracy:.2f}"
+                          f" tom={top.tom.cumulative_accuracy:.2f}"
+                          f" gw={top.grammar.grammar_weight:.2f}")
 
         if tick > 0 and tick % checkpoint_interval == 0:
             ckpt_path = os.path.join(args.output, f"checkpoint_{tick:08d}.pkl")

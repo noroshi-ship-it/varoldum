@@ -29,6 +29,15 @@ def reproduce_asexual(
 
     child.inherit_concept_hypotheses(parent, rng)
 
+    # Phase 6-8: Inherit meta-cognition systems
+    child.inherit_grammar(parent, rng)
+    child.inherit_meta_concepts(parent, rng)
+    child.inherit_tom(parent, rng)
+
+    # Phase 9-12: Inherit cognitive systems
+    child.inherit_episodic(parent, rng)
+    child.inherit_naming(parent, rng)
+
     child.lineage_id = parent.lineage_id
     child.body.init_genetic_frailty(rng)
 
@@ -58,13 +67,20 @@ def reproduce_sexual(
     stats_a = parent_a.hypotheses.stats
     stats_b = parent_b.hypotheses.stats
     if stats_a["mean_accuracy"] >= stats_b["mean_accuracy"]:
-        child.inherit_hypotheses(parent_a.get_hypothesis_data(), rng)
-        child.inherit_composable_rules(parent_a, rng)
-        child.inherit_concept_hypotheses(parent_a, rng)
+        better = parent_a
     else:
-        child.inherit_hypotheses(parent_b.get_hypothesis_data(), rng)
-        child.inherit_composable_rules(parent_b, rng)
-        child.inherit_concept_hypotheses(parent_b, rng)
+        better = parent_b
+    child.inherit_hypotheses(better.get_hypothesis_data(), rng)
+    child.inherit_composable_rules(better, rng)
+    child.inherit_concept_hypotheses(better, rng)
+    # Phase 6-8: Inherit from better parent
+    child.inherit_grammar(better, rng)
+    child.inherit_meta_concepts(better, rng)
+    child.inherit_tom(better, rng)
+
+    # Phase 9-12: Inherit cognitive systems from better parent
+    child.inherit_episodic(better, rng)
+    child.inherit_naming(better, rng)
 
     child.lineage_id = parent_a.lineage_id if parent_a.generation >= parent_b.generation else parent_b.lineage_id
     child.body.init_genetic_frailty(rng)

@@ -28,25 +28,29 @@ DURABILITY = {
     StructureType.STORAGE: 1500,
     StructureType.TRAP: 800,
     StructureType.FARM: 3000,
-    StructureType.MARKER: 5000,
+    StructureType.MARKER: 10000,  # Cultural monuments: 2x durability
     StructureType.NEST: 2500,
 }
 
 
-MAX_INSCRIPTIONS = 5
+MAX_INSCRIPTIONS = 12
 
 
 class Inscription:
     """A piece of symbolic knowledge left on a structure.
-    Contains token sequence + the concept embedding at time of writing."""
-    __slots__ = ['tokens', 'concept_embedding', 'author_lineage', 'tick_written']
+    Contains token sequence + the concept embedding at time of writing.
+    Optionally stores rule_data for cultural transmission."""
+    __slots__ = ['tokens', 'concept_embedding', 'author_lineage', 'tick_written',
+                 'rule_data', 'use_count']
 
     def __init__(self, tokens: np.ndarray, concept_embedding: np.ndarray,
-                 author_lineage: int, tick: int):
+                 author_lineage: int, tick: int, rule_data=None):
         self.tokens = tokens.copy()
         self.concept_embedding = concept_embedding.copy()
         self.author_lineage = author_lineage
         self.tick_written = tick
+        self.rule_data = rule_data  # optional np.ndarray of encoded rule
+        self.use_count = 0
 
 
 class Structure:
