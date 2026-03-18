@@ -131,8 +131,8 @@ class Body:
             self.injury_level = max(0, self.injury_level - 0.002)
 
         # === AGE-RELATED DECLINE: organs fail with age ===
-        if age_factor > 0.6:
-            decline_rate = (age_factor - 0.6) * 0.01
+        if age_factor > 0.4:
+            decline_rate = (age_factor - 0.4) * 0.025  # starts earlier, hits harder
             self.take_damage(decline_rate)
             dmg += decline_rate
             if self.health <= 0:

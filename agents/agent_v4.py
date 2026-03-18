@@ -629,8 +629,12 @@ class Agent:
 
     def can_reproduce(self):
         threshold = get_trait(self.genome, "reproduction_threshold")
+        # Diminishing returns: each child raises the energy bar
+        # Prevents single agents from dominating the gene pool
+        child_penalty = min(0.3, self.children_count * 0.005)
+        effective_threshold = threshold + child_penalty
         return (
-            self.body.energy > threshold
+            self.body.energy > effective_threshold
             and self.body.age > self._cfg.maturity_age
             and self.body.is_alive()
         )
