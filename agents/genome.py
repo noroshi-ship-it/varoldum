@@ -120,7 +120,7 @@ COGNITIVE_LOCI = {
 
 # Emergence infrastructure genes (Phase 13)
 EMERGENCE_OFFSET = COGNITIVE_OFFSET + COGNITIVE_COUNT  # 73
-EMERGENCE_COUNT = 12
+EMERGENCE_COUNT = 14
 
 EMERGENCE_LOCI = {
     "workspace_slots":       (EMERGENCE_OFFSET + 0, 0.0, 6.0),
@@ -136,6 +136,8 @@ EMERGENCE_LOCI = {
     # Group identity
     "group_identity_weight": (EMERGENCE_OFFSET + 10, 0.0, 1.0),
     "in_group_cooperation":  (EMERGENCE_OFFSET + 11, 0.0, 2.0),
+    "reputation_sensitivity": (EMERGENCE_OFFSET + 12, 0.0, 2.0),
+    "group_benefit_sensitivity": (EMERGENCE_OFFSET + 13, 0.0, 2.0),
 }
 
 FIXED_GENE_COUNT = NUM_TRAIT_GENES + ARCH_COUNT + MORPH_COUNT + CONCEPT_COUNT + ABSTRACT_COUNT + SOCIETY_COUNT + META_COUNT + COGNITIVE_COUNT + EMERGENCE_COUNT
@@ -224,6 +226,8 @@ def random_genome(cfg: Config, max_nn_params: int, rng: np.random.Generator) -> 
     genes[EMERGENCE_OFFSET + 9] = rng.uniform(0.0, 0.3)        # norm_inheritance (start low)
     genes[EMERGENCE_OFFSET + 10] = rng.uniform(0.0, 0.3)       # group_identity_weight (start low)
     genes[EMERGENCE_OFFSET + 11] = rng.uniform(0.0, 0.5)       # in_group_cooperation (start low)
+    genes[EMERGENCE_OFFSET + 12] = rng.uniform(0.0, 0.5)       # reputation_sensitivity (start low)
+    genes[EMERGENCE_OFFSET + 13] = rng.uniform(0.0, 0.5)       # group_benefit_sensitivity (start low)
 
     nn_start = FIXED_GENE_COUNT
     genes[nn_start:] = rng.standard_normal(max_nn_params) * 0.3

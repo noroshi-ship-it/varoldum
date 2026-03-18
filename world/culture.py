@@ -133,6 +133,11 @@ class CultureSystem:
                         teacher._pending_social_reward += 0.8
                     # Direct energy reward: teaching lineages survive better
                     teacher.body.energy = min(1.0, teacher.body.energy + 0.03)
+                    # Phase 14: Teaching prestige + reputation
+                    if hasattr(teacher, 'teaching_prestige'):
+                        teacher.teaching_prestige = min(1.0, teacher.teaching_prestige + 0.1)
+                    if hasattr(teacher, 'reputation'):
+                        teacher.reputation = min(1.0, teacher.reputation + 0.15)
                     # Student also benefits from learning
                     if hasattr(student, '_pending_social_reward'):
                         student._pending_social_reward += 0.3

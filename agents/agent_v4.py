@@ -215,6 +215,13 @@ class Agent:
         self._group_identity_weight = get_trait(genome, "group_identity_weight")
         self._in_group_cooperation = get_trait(genome, "in_group_cooperation")
         self._nearby_in_group_ratio = 0.0  # updated each tick from main loop
+        # Phase 14: Selective pressures
+        self._reputation_sensitivity = get_trait(genome, "reputation_sensitivity")
+        self._group_benefit_sensitivity = get_trait(genome, "group_benefit_sensitivity")
+        self.reputation = 0.0            # [-1, +1] cooperation/defection history
+        self.teaching_prestige = 0.0     # [0, 1] teaching success history
+        self._nearby_avg_reputation = 0.0  # updated each tick from main loop
+        self._group_safety_factor = 1.0    # updated each tick from main loop
 
         # Phase 5: Society engine
         inv_capacity = int(round(get_trait(genome, "inventory_capacity")))
@@ -466,6 +473,11 @@ class Agent:
                 self._nearby_in_group_ratio,
                 self._group_identity_weight,
                 self._in_group_cooperation,
+            ], dtype=np.float64),
+            np.array([     # 3 dims: reputation, group safety (Phase 14)
+                self.reputation,
+                self._nearby_avg_reputation,
+                self._group_safety_factor,
             ], dtype=np.float64),
         ])
         return self._context
@@ -850,11 +862,15 @@ class Agent:
         morph_cost = self.morphology.total_metabolic_cost
         think_cost = self._think_steps_used * self._cfg.think_energy_cost
 
-        # Isolation stress: high social_need increases metabolic cost
-        # This is physics — loneliness literally costs energy (stress hormones)
-        isolation_cost = self.internal.social_need * 0.002 * self._social_sensitivity_k
+        # Phase 14: Quadratic isolation stress — loneliness is metabolically expensive
+        sn = self.internal.social_need
+        isolation_cost = sn * 0.004 + sn ** 2 * 0.006 * self._social_sensitivity_k
         # Grief cost: recent partner loss adds stress
         grief_cost = self._grief_level * 0.003
+
+        # Phase 14: Reputation decay toward neutral
+        self.reputation *= 0.9995
+        self.teaching_prestige *= 0.999
 
         temp_modifier = 0.7 + 0.6 * temperature
         total_cost = brain_cost + morph_cost + think_cost + isolation_cost + grief_cost

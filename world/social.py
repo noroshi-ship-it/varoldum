@@ -96,6 +96,11 @@ class SocialSystem:
                         positive_interactions[agent.id] = positive_interactions.get(agent.id, 0) + share_signal
                         positive_interactions[other.id] = positive_interactions.get(other.id, 0) + share_signal
 
+                        # Phase 14: Reputation boost from cooperation
+                        if hasattr(agent, 'reputation'):
+                            agent.reputation = min(1.0, agent.reputation + share * 2.0)
+                        if hasattr(other, 'reputation'):
+                            other.reputation = min(1.0, other.reputation + share * 1.0)
                         self._tick_interactions.append(
                             SocialInteraction("cooperate", agent.id, other.id, share, tick)
                         )
@@ -157,6 +162,9 @@ class SocialSystem:
                         negative_interactions[other.id] = negative_interactions.get(other.id, 0) + take_force
                         negative_interactions[agent.id] = negative_interactions.get(agent.id, 0) + attacker_damage * 5.0
 
+                        # Phase 14: Reputation penalty for aggression
+                        if hasattr(agent, 'reputation'):
+                            agent.reputation = max(-1.0, agent.reputation - take_force * 1.5)
                         self._tick_interactions.append(
                             SocialInteraction("combat", agent.id, other.id, stolen, tick)
                         )
@@ -192,6 +200,11 @@ class SocialSystem:
                             positive_interactions[agent.id] = positive_interactions.get(agent.id, 0) + 0.5
                             positive_interactions[other.id] = positive_interactions.get(other.id, 0) + 0.5
 
+                            # Phase 14: Reputation boost from trade
+                            if hasattr(agent, 'reputation'):
+                                agent.reputation = min(1.0, agent.reputation + trade_amount * 1.5)
+                            if hasattr(other, 'reputation'):
+                                other.reputation = min(1.0, other.reputation + trade_amount * 1.5)
                             self._tick_interactions.append(
                                 SocialInteraction("trade", agent.id, other.id, trade_amount, tick)
                             )

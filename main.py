@@ -81,11 +81,11 @@ _spatial = SpatialHash(cell_size=8)
 
 
 def find_mate(agent, agents, cfg):
-    """Sexual selection: prefer smarter mates.
-    Doesn't pick the first nearby — picks the smartest nearby."""
+    """Sexual selection: prefer smarter + reputable mates (Phase 14)."""
     nearby = _spatial.query(agent.body.position[0], agent.body.position[1], 3.0)
     best_mate = None
-    best_intel = -1.0
+    best_fitness = -1.0
+    rep_sens = getattr(agent, '_reputation_sensitivity', 0.0)
     for other in nearby:
         if other.id == agent.id or not other.can_reproduce():
             continue
@@ -93,8 +93,12 @@ def find_mate(agent, agents, cfg):
                                  cfg.world_width, cfg.world_height)
         if dist < 3.0:
             intel = getattr(other.brain, 'cumulative_wm_accuracy', 0.0)
-            if intel > best_intel:
-                best_intel = intel
+            rep = getattr(other, 'reputation', 0.0)
+            prestige = getattr(other, 'teaching_prestige', 0.0)
+            # Phase 14: reputation + prestige weighted by chooser's sensitivity
+            fitness = intel + rep_sens * (0.3 * max(0.0, rep) + 0.2 * prestige)
+            if fitness > best_fitness:
+                best_fitness = fitness
                 best_mate = other
     return best_mate
 
@@ -194,11 +198,19 @@ def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng, ec
             if n_eaters > 1:
                 my_intel = cell_intel_map.get(((x, y), agent.id), 0.3)
                 total_intel = cell_intel_total.get((x, y), my_intel)
-                # My share of the food, weighted by intelligence
                 intel_share = my_intel / max(0.01, total_intel)
-                # Scale: solo=1.0, competing=proportional to smarts
-                # Small cooperation bonus still exists but intelligence dominates
-                raw_consumed *= intel_share * n_eaters * (1.0 + 0.1 * (n_eaters - 1))
+                # Phase 14: Cooperative foraging synergy
+                gbs = getattr(agent, '_group_benefit_sensitivity', 0.0)
+                synergy = 1.0 + (0.1 + 0.35 * gbs) * min(n_eaters - 1, 4)
+                synergy = min(synergy, 1.0 + gbs * 1.0)
+                raw_consumed *= intel_share * n_eaters * synergy
+            else:
+                # Phase 14: Rich resource solo penalty — dense patches resist solo extraction
+                resource_density = grid.cells[x, y, 0]
+                if resource_density > 0.7:
+                    gbs = getattr(agent, '_group_benefit_sensitivity', 0.0)
+                    solo_penalty = max(0.2, 0.6 - 0.15 * gbs)
+                    raw_consumed *= solo_penalty
             # Intelligence foraging bonus on top: smarter brains extract more
             wm_acc = getattr(agent.brain, 'cumulative_wm_accuracy', 0.0)
             intel_bonus = 0.4 + 1.1 * wm_acc  # range [0.4, 1.5]
@@ -327,7 +339,11 @@ def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng, ec
         if ecology is not None:
             pred_danger = ecology.get_predator_danger(x, y)
             if pred_danger > 0 and evo_rng.random() < pred_danger:
-                pred_dmg = pred_danger * 0.3
+                # Phase 14: Group predator defense — nearby agents reduce damage
+                nearby = getattr(agent, '_nearby_agent_count', 0)
+                gbs = getattr(agent, '_group_benefit_sensitivity', 0.0)
+                defense_factor = 1.0 / (1.0 + nearby * (0.05 + 0.15 * gbs))
+                pred_dmg = pred_danger * 0.3 * defense_factor
                 agent.body.take_damage(pred_dmg)
                 data["damage"] += pred_dmg
                 if agent.body.health <= 0:
@@ -513,15 +529,29 @@ def main():
         for agent in agents:
             nearby = count_nearby(agent, agents, radius=4)
             agent._nearby_agent_count = nearby  # Phase 5A: feed social emotions
-            # Phase 13: Group identity — compute in-group ratio
-            if nearby > 0 and hasattr(agent, '_group_identity_weight'):
-                nearby_others = _spatial.query(agent.x, agent.y, 4)
+            # Phase 13-14: Group identity, cooperative benefits
+            nearby_others = _spatial.query(agent.x, agent.y, 4) if nearby > 0 else []
+            if nearby > 0:
                 same_lineage = sum(1 for o in nearby_others
                                    if o.id != agent.id and o.is_alive
                                    and o.lineage_id == agent.lineage_id)
                 agent._nearby_in_group_ratio = same_lineage / max(1, nearby)
-            elif hasattr(agent, '_nearby_in_group_ratio'):
+                # Phase 14: Group health regen
+                gbs = getattr(agent, '_group_benefit_sensitivity', 0.0)
+                group_heal = min(nearby, 5) * 0.0005 * (1.0 + gbs)
+                agent.body.health = min(1.0, agent.body.health + group_heal)
+                # Phase 14: Avg reputation of nearby agents
+                rep_sum = sum(getattr(o, 'reputation', 0.0)
+                              for o in nearby_others if o.id != agent.id and o.is_alive)
+                agent._nearby_avg_reputation = rep_sum / max(1, nearby)
+            else:
                 agent._nearby_in_group_ratio = 0.0
+                agent._nearby_avg_reputation = 0.0
+            # Phase 14: Group safety factor (predator defense signal for brain)
+            if ecology is not None:
+                pd = ecology.get_predator_danger(agent.x, agent.y)
+                gbs_s = getattr(agent, '_group_benefit_sensitivity', 0.0)
+                agent._group_safety_factor = 1.0 / (1.0 + pd * max(0.5, 1.0 - nearby * (0.05 + 0.15 * gbs_s)))
             heard = language.get_strongest_signal(agent, tick)
             # Phase 3: Pass heard discrete tokens
             heard_tokens = discrete_lang.get_nearest_utterance(
@@ -586,6 +616,20 @@ def main():
 
                 # Set attended entity for context
                 agent._attended_entity = ("agent", best_other_id) if best_other_id is not None else None
+
+            # Phase 14: Group alarm propagation — disaster warnings spread passively
+            for agent in agents:
+                if not agent.is_alive:
+                    continue
+                max_warning = float(np.max(agent._disaster_warnings))
+                if max_warning > 0.2:
+                    alarm_others = _spatial.query(agent.x, agent.y, 4)
+                    for other in alarm_others:
+                        if other.id != agent.id and other.is_alive:
+                            gbs_o = getattr(other, '_group_benefit_sensitivity', 0.0)
+                            other._disaster_warnings = np.maximum(
+                                other._disaster_warnings,
+                                agent._disaster_warnings * 0.3 * (1.0 + gbs_o))
         t2 = time.time()
 
         if use_gpu:
@@ -1110,6 +1154,11 @@ def main():
                         "mean_temporal_encoding": mean_temporal,
                         "mean_group_identity": mean_group_weight,
                         "mean_in_group_ratio": mean_in_group_ratio,
+                        # Phase 14: Selective pressure metrics
+                        "mean_reputation": float(np.mean([a.reputation for a in alive])),
+                        "mean_prestige": float(np.mean([a.teaching_prestige for a in alive])),
+                        "mean_reputation_sensitivity": float(np.mean([a._reputation_sensitivity for a in alive])),
+                        "mean_group_benefit": float(np.mean([a._group_benefit_sensitivity for a in alive])),
                         "pop_size": len(alive),
                     })
 
