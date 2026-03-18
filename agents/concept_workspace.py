@@ -29,11 +29,14 @@ class ConceptWorkspace:
         if self.n_slots == 0:
             return np.zeros(self.bottleneck_size, dtype=np.float32)
 
-        q_norm = np.linalg.norm(query)
+        q = np.zeros(self.bottleneck_size, dtype=np.float32)
+        n = min(len(query), self.bottleneck_size)
+        q[:n] = query[:n]
+        q_norm = np.linalg.norm(q)
         if q_norm < 1e-8:
             return np.zeros(self.bottleneck_size, dtype=np.float32)
 
-        q_unit = query[:self.bottleneck_size].astype(np.float32) / q_norm
+        q_unit = q / q_norm
         sims = self.slots @ q_unit
         sims_exp = np.exp(np.clip(sims * 3.0, -10, 10))
         weights = sims_exp / (np.sum(sims_exp) + 1e-8)
@@ -51,7 +54,9 @@ class ConceptWorkspace:
         if effective_gate < 0.1:
             return
 
-        q = slot_query[:self.bottleneck_size].astype(np.float32)
+        q = np.zeros(self.bottleneck_size, dtype=np.float32)
+        nq = min(len(slot_query), self.bottleneck_size)
+        q[:nq] = slot_query[:nq]
         q_norm = np.linalg.norm(q)
         if q_norm < 1e-8:
             target_slot = self._write_count % self.n_slots
@@ -59,7 +64,9 @@ class ConceptWorkspace:
             sims = self.slots @ (q / q_norm)
             target_slot = int(np.argmax(sims))
 
-        c = content[:self.bottleneck_size].astype(np.float32)
+        c = np.zeros(self.bottleneck_size, dtype=np.float32)
+        nc = min(len(content), self.bottleneck_size)
+        c[:nc] = content[:nc]
         self.slots[target_slot] = (
             (1 - effective_gate) * self.slots[target_slot]
             + effective_gate * np.tanh(c)

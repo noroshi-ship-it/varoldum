@@ -44,7 +44,8 @@ class NormSystem:
             self._last_reward_modulation = 0.0
             return 0.0
 
-        c = concepts[:self.bottleneck_size].astype(np.float32)
+        n = min(len(concepts), self.bottleneck_size)
+        c = concepts[:n].astype(np.float32)
         c_norm = np.linalg.norm(c)
         if c_norm < 1e-8:
             self._last_reward_modulation = 0.0
@@ -53,10 +54,11 @@ class NormSystem:
 
         modulation = 0.0
         for norm in self.norms:
-            p_norm = np.linalg.norm(norm.pattern)
+            p = norm.pattern[:n]
+            p_norm = np.linalg.norm(p)
             if p_norm < 1e-8:
                 continue
-            similarity = float(np.dot(c_unit, norm.pattern / p_norm))
+            similarity = float(np.dot(c_unit, p / p_norm))
             if similarity > threshold:
                 firing = (similarity - threshold) / (1.0 - threshold + 1e-8)
                 modulation += norm.valence * norm.strength * firing
@@ -71,17 +73,19 @@ class NormSystem:
         if self.capacity == 0:
             return
 
-        c = concepts[:self.bottleneck_size].astype(np.float32)
+        n = min(len(concepts), self.bottleneck_size)
+        c = concepts[:n].astype(np.float32)
         c_norm_val = np.linalg.norm(c)
 
         # Update existing norm accuracy
         if c_norm_val > 1e-8:
             c_unit = c / c_norm_val
             for norm in self.norms:
-                p_norm = np.linalg.norm(norm.pattern)
+                p = norm.pattern[:n]
+                p_norm = np.linalg.norm(p)
                 if p_norm < 1e-8:
                     continue
-                sim = float(np.dot(c_unit, norm.pattern / p_norm))
+                sim = float(np.dot(c_unit, p / p_norm))
                 if sim > 0.3:
                     agreement = 1.0 if (norm.valence * reward > 0) else 0.0
                     norm.accuracy += 0.05 * (agreement - norm.accuracy)
