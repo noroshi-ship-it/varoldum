@@ -119,6 +119,7 @@ class HallOfFame:
             "bottleneck_size": agent.bottleneck_size,
             "best_concept_acc": round(float(best_concept_acc), 4),
             "best_concept_rule": best_concept_desc,
+            "cause_of_death": getattr(agent.body, 'cause_of_death', 'unknown'),
         }
 
         name = generate_legendary_name(aid, gen)

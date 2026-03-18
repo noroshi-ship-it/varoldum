@@ -30,6 +30,7 @@ def reproduce_asexual(
     child.inherit_concept_hypotheses(parent, rng)
 
     child.lineage_id = parent.lineage_id
+    child.body.init_genetic_frailty(rng)
 
     parent.body.energy -= cfg.reproduction_cost
     child.body.energy = cfg.reproduction_cost * 0.7
@@ -66,6 +67,7 @@ def reproduce_sexual(
         child.inherit_concept_hypotheses(parent_b, rng)
 
     child.lineage_id = parent_a.lineage_id if parent_a.generation >= parent_b.generation else parent_b.lineage_id
+    child.body.init_genetic_frailty(rng)
 
     cost = cfg.reproduction_cost * 0.6
     parent_a.body.energy -= cost

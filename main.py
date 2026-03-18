@@ -280,6 +280,10 @@ def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng, ec
                     agent.body.energy += 0.003 * care
                     agent.body.health = min(1.0, agent.body.health + 0.0015 * care)
 
+        # === NATURAL MORTALITY: infection, genetic defects, accidents, aging ===
+        natural_dmg = agent.body.update_natural_mortality(evo_rng)
+        data["damage"] += natural_dmg
+
         # === ENVIRONMENTAL DAMAGE (pure physics) ===
         hazard = grid.get_cell(x, y)[1]
         hazard_dmg = hazard * 0.1
@@ -298,6 +302,8 @@ def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng, ec
                 pred_dmg = pred_danger * 0.3
                 agent.body.take_damage(pred_dmg)
                 data["damage"] += pred_dmg
+                if agent.body.health <= 0:
+                    agent.body.cause_of_death = "predator"
 
         rad_dmg = physics.hidden.get_radiation_damage(x, y)
         if rad_dmg > 0:
@@ -329,6 +335,13 @@ def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng, ec
                 agent.body.energy -= dd["plague"] * 0.05
                 disaster_dmg += pl_dmg
             data["disaster_damage"] = disaster_dmg
+            if agent.body.health <= 0 and disaster_dmg > 0:
+                if dd["earthquake"] > dd["flood"] and dd["earthquake"] > dd["plague"]:
+                    agent.body.cause_of_death = "earthquake"
+                elif dd["flood"] > dd["plague"]:
+                    agent.body.cause_of_death = "flood"
+                elif dd["plague"] > 0:
+                    agent.body.cause_of_death = "plague"
 
         data["toxin"] = toxin
         data["damage"] += hazard_dmg + toxin_dmg + trap_dmg + disaster_dmg

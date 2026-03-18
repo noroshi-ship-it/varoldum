@@ -666,4 +666,6 @@ class Agent:
     def create_random(cls, cfg, position, rng):
         max_nn = cls.estimate_max_nn_params(cfg)
         genome = random_genome(cfg, max_nn, rng)
-        return cls(genome, cfg, position)
+        agent = cls(genome, cfg, position)
+        agent.body.init_genetic_frailty(rng)
+        return agent
