@@ -38,6 +38,10 @@ def reproduce_asexual(
     child.inherit_episodic(parent, rng)
     child.inherit_naming(parent, rng)
 
+    # Phase 13: Inherit emergence infrastructure
+    child.inherit_workspace(parent, rng)
+    child.inherit_norms(parent, rng)
+
     child.lineage_id = parent.lineage_id
     child.body.init_genetic_frailty(rng)
 
@@ -81,6 +85,10 @@ def reproduce_sexual(
     # Phase 9-12: Inherit cognitive systems from better parent
     child.inherit_episodic(better, rng)
     child.inherit_naming(better, rng)
+
+    # Phase 13: Inherit emergence infrastructure from better parent
+    child.inherit_workspace(better, rng)
+    child.inherit_norms(better, rng)
 
     child.lineage_id = parent_a.lineage_id if parent_a.generation >= parent_b.generation else parent_b.lineage_id
     child.body.init_genetic_frailty(rng)

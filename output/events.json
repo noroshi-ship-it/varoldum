@@ -124,13 +124,297 @@
       "data": {
         "generation": 5
       }
+    },
+    {
+      "tick": 100,
+      "type": "concept_breakthrough",
+      "severity": "milestone",
+      "icon": "star",
+      "title": "Concept Breakthrough",
+      "description": "Rule #1: IF temp_comfort<0.79 THEN ENERGY_UP [acc=0.97, n=58] by lineage 426",
+      "data": {
+        "rule": "IF temp_comfort<0.79 THEN ENERGY_UP [acc=0.97, n=58]",
+        "accuracy": 0.9655172413793104,
+        "tests": 58
+      }
+    },
+    {
+      "tick": 100,
+      "type": "concept_breakthrough",
+      "severity": "milestone",
+      "icon": "star",
+      "title": "Concept Breakthrough",
+      "description": "Rule #2: IF C6>-0.52 AND fear>0.29 AND C5<0.51 THEN ENERGY_UP [acc=0.95, n=63] by lineage 491",
+      "data": {
+        "rule": "IF C6>-0.52 AND fear>0.29 AND C5<0.51 THEN ENERGY_UP [acc=0.95, n=63]",
+        "accuracy": 0.9523809523809523,
+        "tests": 63
+      }
+    },
+    {
+      "tick": 100,
+      "type": "concept_breakthrough",
+      "severity": "milestone",
+      "icon": "star",
+      "title": "Concept Breakthrough",
+      "description": "Rule #3: IF health>0.20 THEN SAFE [acc=0.98, n=52] by lineage 150",
+      "data": {
+        "rule": "IF health>0.20 THEN SAFE [acc=0.98, n=52]",
+        "accuracy": 0.9807692307692307,
+        "tests": 52
+      }
+    },
+    {
+      "tick": 200,
+      "type": "population_boom",
+      "severity": "growth",
+      "icon": "rocket",
+      "title": "Population Boom",
+      "description": "Population doubled from 598 to 1994",
+      "data": {
+        "from": 598,
+        "to": 1994
+      }
+    },
+    {
+      "tick": 200,
+      "type": "concept_breakthrough",
+      "severity": "milestone",
+      "icon": "star",
+      "title": "Concept Breakthrough",
+      "description": "Rule #10: IF energy>0.58 THEN ENERGY_UP [acc=1.00, n=60] by lineage 375",
+      "data": {
+        "rule": "IF energy>0.58 THEN ENERGY_UP [acc=1.00, n=60]",
+        "accuracy": 1.0,
+        "tests": 60
+      }
+    },
+    {
+      "tick": 200,
+      "type": "concept_breakthrough",
+      "severity": "milestone",
+      "icon": "star",
+      "title": "Concept Breakthrough",
+      "description": "Rule #25: IF C9>0.17 AND C13<-0.04 AND C14>0.06 AND health>-0.20 AND C8>0.13 THEN ENERGY_UP [acc=0.96, n=90] by lineage 164",
+      "data": {
+        "rule": "IF C9>0.17 AND C13<-0.04 AND C14>0.06 AND health>-0.20 AND C8>0.13 THEN ENERGY_UP [acc=0.96, n=90]",
+        "accuracy": 0.9555555555555556,
+        "tests": 90
+      }
+    },
+    {
+      "tick": 200,
+      "type": "concept_breakthrough",
+      "severity": "milestone",
+      "icon": "star",
+      "title": "Concept Breakthrough",
+      "description": "Rule #50: IF C6>-0.30 THEN SAFE [acc=0.98, n=62] by lineage 478",
+      "data": {
+        "rule": "IF C6>-0.30 THEN SAFE [acc=0.98, n=62]",
+        "accuracy": 0.9838709677419355,
+        "tests": 62
+      }
+    },
+    {
+      "tick": 500,
+      "type": "world_model_milestone",
+      "severity": "milestone",
+      "icon": "eye",
+      "title": "World Model >90% Accuracy",
+      "description": "Agent #195 can predict the world with >90% accuracy. Bottleneck: 15 concepts, Think: 2 steps",
+      "data": {
+        "agent_id": 195,
+        "accuracy": 0.9051015263656057,
+        "bottleneck": 15
+      }
+    },
+    {
+      "tick": 800,
+      "type": "mass_extinction",
+      "severity": "crisis",
+      "icon": "skull",
+      "title": "Mass Extinction",
+      "description": "Population crashed from 1987 to 894 (55% loss)",
+      "data": {
+        "from": 1987,
+        "to": 894
+      }
+    },
+    {
+      "tick": 800,
+      "type": "lineage_extinction",
+      "severity": "crisis",
+      "icon": "tombstone",
+      "title": "Lineage 183 Extinct",
+      "description": "Lineage 183 (had 38 agents) has gone extinct",
+      "data": {
+        "lineage_id": 183,
+        "previous_count": 38
+      }
+    },
+    {
+      "tick": 800,
+      "type": "lineage_extinction",
+      "severity": "crisis",
+      "icon": "tombstone",
+      "title": "Lineage 228 Extinct",
+      "description": "Lineage 228 (had 10 agents) has gone extinct",
+      "data": {
+        "lineage_id": 228,
+        "previous_count": 10
+      }
+    },
+    {
+      "tick": 900,
+      "type": "mass_extinction",
+      "severity": "crisis",
+      "icon": "skull",
+      "title": "Mass Extinction",
+      "description": "Population crashed from 894 to 266 (70% loss)",
+      "data": {
+        "from": 894,
+        "to": 266
+      }
+    },
+    {
+      "tick": 900,
+      "type": "lineage_extinction",
+      "severity": "crisis",
+      "icon": "tombstone",
+      "title": "Lineage 326 Extinct",
+      "description": "Lineage 326 (had 10 agents) has gone extinct",
+      "data": {
+        "lineage_id": 326,
+        "previous_count": 10
+      }
+    },
+    {
+      "tick": 900,
+      "type": "lineage_extinction",
+      "severity": "crisis",
+      "icon": "tombstone",
+      "title": "Lineage 116 Extinct",
+      "description": "Lineage 116 (had 11 agents) has gone extinct",
+      "data": {
+        "lineage_id": 116,
+        "previous_count": 11
+      }
+    },
+    {
+      "tick": 900,
+      "type": "lineage_extinction",
+      "severity": "crisis",
+      "icon": "tombstone",
+      "title": "Lineage 460 Extinct",
+      "description": "Lineage 460 (had 12 agents) has gone extinct",
+      "data": {
+        "lineage_id": 460,
+        "previous_count": 12
+      }
+    },
+    {
+      "tick": 900,
+      "type": "lineage_extinction",
+      "severity": "crisis",
+      "icon": "tombstone",
+      "title": "Lineage 240 Extinct",
+      "description": "Lineage 240 (had 13 agents) has gone extinct",
+      "data": {
+        "lineage_id": 240,
+        "previous_count": 13
+      }
+    },
+    {
+      "tick": 900,
+      "type": "lineage_extinction",
+      "severity": "crisis",
+      "icon": "tombstone",
+      "title": "Lineage 356 Extinct",
+      "description": "Lineage 356 (had 15 agents) has gone extinct",
+      "data": {
+        "lineage_id": 356,
+        "previous_count": 15
+      }
+    },
+    {
+      "tick": 1000,
+      "type": "mass_extinction",
+      "severity": "crisis",
+      "icon": "skull",
+      "title": "Mass Extinction",
+      "description": "Population crashed from 266 to 50 (81% loss)",
+      "data": {
+        "from": 266,
+        "to": 50
+      }
+    },
+    {
+      "tick": 1000,
+      "type": "lineage_extinction",
+      "severity": "crisis",
+      "icon": "tombstone",
+      "title": "Lineage 200 Extinct",
+      "description": "Lineage 200 (had 40 agents) has gone extinct",
+      "data": {
+        "lineage_id": 200,
+        "previous_count": 40
+      }
+    },
+    {
+      "tick": 1000,
+      "type": "lineage_extinction",
+      "severity": "crisis",
+      "icon": "tombstone",
+      "title": "Lineage 248 Extinct",
+      "description": "Lineage 248 (had 10 agents) has gone extinct",
+      "data": {
+        "lineage_id": 248,
+        "previous_count": 10
+      }
+    },
+    {
+      "tick": 1000,
+      "type": "lineage_extinction",
+      "severity": "crisis",
+      "icon": "tombstone",
+      "title": "Lineage 219 Extinct",
+      "description": "Lineage 219 (had 12 agents) has gone extinct",
+      "data": {
+        "lineage_id": 219,
+        "previous_count": 12
+      }
+    },
+    {
+      "tick": 1300,
+      "type": "population_boom",
+      "severity": "growth",
+      "icon": "rocket",
+      "title": "Population Boom",
+      "description": "Population doubled from 73 to 1988",
+      "data": {
+        "from": 73,
+        "to": 1988
+      }
+    },
+    {
+      "tick": 1300,
+      "type": "concept_breakthrough",
+      "severity": "milestone",
+      "icon": "star",
+      "title": "Concept Breakthrough",
+      "description": "Rule #100: IF C13<0.59 AND C1>-0.18 THEN ENERGY_UP [acc=0.97, n=92] by lineage 213229",
+      "data": {
+        "rule": "IF C13<0.59 AND C1>-0.18 THEN ENERGY_UP [acc=0.97, n=92]",
+        "accuracy": 0.967391304347826,
+        "tests": 92
+      }
     }
   ],
   "state": {
     "seen_first_concept": true,
     "seen_first_signal": true,
     "seen_first_complex": true,
-    "seen_wm_90": false,
-    "max_generation": 5
+    "seen_wm_90": true,
+    "max_generation": 8
   }
 }

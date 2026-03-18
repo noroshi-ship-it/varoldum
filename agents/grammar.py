@@ -34,7 +34,7 @@ class GrammarSystem:
 
     __slots__ = [
         'bottleneck_size', 'n_slots', 'grammar_lr', 'grammar_weight',
-        'role_embeddings', '_role_usage',
+        'role_embeddings', '_role_usage', 'temporal_encoding',
     ]
 
     def __init__(self, bottleneck_size: int, n_slots: int,
@@ -56,14 +56,17 @@ class GrammarSystem:
                 self.role_embeddings[i] /= norm
 
         self._role_usage = np.zeros(self.n_slots, dtype=np.int32)
+        self.temporal_encoding = 0.0  # set externally from gene
 
     def encode_structured(self, concepts: np.ndarray, speak_intent: float,
                           vocab: DiscreteVocab,
                           referent_token: int | None = None,
-                          referential_weight: float = 0.0) -> 'StructuredUtterance | None':
+                          referential_weight: float = 0.0,
+                          temporal_context: np.ndarray | None = None) -> 'StructuredUtterance | None':
         """Encode concepts into a structured utterance with grammatical roles.
         If referent_token is provided and referential_weight > 0.3,
-        the last slot encodes the referent instead of gated concepts."""
+        the last slot encodes the referent instead of gated concepts.
+        If temporal_encoding > 0.3, one slot encodes temporal context."""
         if speak_intent <= 0:
             return None
 
@@ -78,7 +81,25 @@ class GrammarSystem:
         # Determine if last slot is a referent slot
         use_referent = (referent_token is not None and referential_weight > 0.3
                         and self.n_slots >= 3)
-        concept_slots = self.n_slots - 1 if use_referent else self.n_slots
+        # Determine if a slot encodes temporal context
+        use_temporal = (self.temporal_encoding > 0.3
+                        and temporal_context is not None
+                        and self.n_slots >= 3)
+        reserved = (1 if use_referent else 0) + (1 if use_temporal else 0)
+        concept_slots = max(1, self.n_slots - reserved)
+
+        # Temporal slot: encode temporal context through role embedding
+        if use_temporal:
+            temporal_slot = concept_slots  # first reserved slot after concepts
+            tc = np.zeros(self.bottleneck_size, dtype=np.float32)
+            n_tc = min(len(temporal_context), self.bottleneck_size)
+            tc[:n_tc] = temporal_context[:n_tc] * self.temporal_encoding
+            gated_t = tc * self.role_embeddings[temporal_slot % self.n_slots]
+            gt_norm = np.linalg.norm(gated_t)
+            if gt_norm > 1e-8:
+                sims_t = vocab.token_meanings[:vocab.vocab_active] @ (gated_t / gt_norm)
+                tokens[temporal_slot] = int(np.argmax(sims_t))
+                self._role_usage[temporal_slot % self.n_slots] += 1
 
         for slot in range(concept_slots):
             # Gate concepts through this slot's role embedding

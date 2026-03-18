@@ -19,7 +19,8 @@ class NameBinding:
 
 
 class NamingSystem:
-    """Agents learn to associate internal 'name tokens' with specific entities."""
+    """Agents learn to associate internal 'name tokens' with specific entities.
+    Supports abstract (non-physical) referents for shared fiction."""
 
     def __init__(self, capacity: int, bottleneck_size: int,
                  learning_rate: float, referential_weight: float):
@@ -27,6 +28,7 @@ class NamingSystem:
         self.bottleneck_size = bottleneck_size
         self.learning_rate = learning_rate
         self.referential_weight = referential_weight
+        self.abstract_capacity = 0  # set externally from gene
         # token_id -> NameBinding
         self.name_registry: dict[int, NameBinding] = {}
         # (entity_type, entity_id) -> token_id
@@ -157,6 +159,46 @@ class NamingSystem:
     def encode_referent(self, entity_type: str, entity_id: int) -> int | None:
         """Get token ID for a named entity (for structured utterances)."""
         return self.entity_to_name.get((entity_type, entity_id))
+
+    def mint_abstract_name(self, token_id: int, concept_signature: np.ndarray,
+                           tick: int) -> bool:
+        """Bind a token to an abstract concept (no physical entity).
+        Only if abstract_capacity > 0 and current abstracts < capacity."""
+        if self.abstract_capacity <= 0:
+            return False
+        # Count current abstract bindings
+        abstract_count = sum(1 for b in self.name_registry.values()
+                             if b.entity_type == "abstract")
+        if abstract_count >= self.abstract_capacity:
+            return False
+
+        abstract_id = int(np.sum(np.abs(concept_signature[:8]) * 1000)) % 100000
+        return self.assign_name(
+            token_id, "abstract", abstract_id,
+            concept_signature, np.zeros(2), tick
+        )
+
+    def should_mint_abstract(self, concepts: np.ndarray,
+                             emotional_salience: float,
+                             min_salience: float = 0.3) -> bool:
+        """Check if agent should try to name an abstract concept."""
+        if self.abstract_capacity <= 0:
+            return False
+        if emotional_salience < min_salience:
+            return False
+        c_norm = np.linalg.norm(concepts)
+        if c_norm < 1e-8:
+            return False
+        c_unit = concepts / c_norm
+        for binding in self.name_registry.values():
+            b_norm = np.linalg.norm(binding.concept_signature)
+            if b_norm < 1e-8:
+                continue
+            sim = float(np.dot(c_unit[:len(binding.concept_signature)],
+                               binding.concept_signature / b_norm))
+            if sim > 0.7:
+                return False
+        return True
 
     @property
     def param_count(self) -> int:

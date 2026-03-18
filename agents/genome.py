@@ -118,7 +118,24 @@ COGNITIVE_LOCI = {
     "episodic_emotion_weight":    (COGNITIVE_OFFSET + 15, 0.0, 2.0),
 }
 
-FIXED_GENE_COUNT = NUM_TRAIT_GENES + ARCH_COUNT + MORPH_COUNT + CONCEPT_COUNT + ABSTRACT_COUNT + SOCIETY_COUNT + META_COUNT + COGNITIVE_COUNT
+# Emergence infrastructure genes (Phase 13)
+EMERGENCE_OFFSET = COGNITIVE_OFFSET + COGNITIVE_COUNT  # 73
+EMERGENCE_COUNT = 10
+
+EMERGENCE_LOCI = {
+    "workspace_slots":       (EMERGENCE_OFFSET + 0, 0.0, 6.0),
+    "workspace_gate":        (EMERGENCE_OFFSET + 1, 0.0, 1.0),
+    "think_branch_count":    (EMERGENCE_OFFSET + 2, 1.0, 4.0),
+    "norm_capacity":         (EMERGENCE_OFFSET + 3, 0.0, 8.0),
+    "norm_sensitivity":      (EMERGENCE_OFFSET + 4, 0.0, 1.0),
+    "abstract_naming":       (EMERGENCE_OFFSET + 5, 0.0, 4.0),
+    "temporal_encoding":     (EMERGENCE_OFFSET + 6, 0.0, 1.0),
+    "composition_depth":     (EMERGENCE_OFFSET + 7, 0.0, 3.0),
+    "counterfactual_weight": (EMERGENCE_OFFSET + 8, 0.0, 1.0),
+    "norm_inheritance":      (EMERGENCE_OFFSET + 9, 0.0, 1.0),
+}
+
+FIXED_GENE_COUNT = NUM_TRAIT_GENES + ARCH_COUNT + MORPH_COUNT + CONCEPT_COUNT + ABSTRACT_COUNT + SOCIETY_COUNT + META_COUNT + COGNITIVE_COUNT + EMERGENCE_COUNT
 
 
 def random_genome(cfg: Config, max_nn_params: int, rng: np.random.Generator) -> np.ndarray:
@@ -191,6 +208,18 @@ def random_genome(cfg: Config, max_nn_params: int, rng: np.random.Generator) -> 
     genes[COGNITIVE_OFFSET + 14] = rng.uniform(0.0, 0.3)       # goal_communication_weight
     genes[COGNITIVE_OFFSET + 15] = rng.uniform(0.0, 0.5)       # episodic_emotion_weight
 
+    # Emergence infrastructure genes (Phase 13) — start at minimum/low
+    genes[EMERGENCE_OFFSET + 0] = rng.uniform(0.0, 1.0)        # workspace_slots (start small)
+    genes[EMERGENCE_OFFSET + 1] = rng.uniform(0.0, 0.2)        # workspace_gate (start weak)
+    genes[EMERGENCE_OFFSET + 2] = rng.uniform(1.0, 1.5)        # think_branch_count (start ~1)
+    genes[EMERGENCE_OFFSET + 3] = rng.uniform(0.0, 1.0)        # norm_capacity (start small)
+    genes[EMERGENCE_OFFSET + 4] = rng.uniform(0.0, 0.2)        # norm_sensitivity (start weak)
+    genes[EMERGENCE_OFFSET + 5] = rng.uniform(0.0, 0.5)        # abstract_naming (start small)
+    genes[EMERGENCE_OFFSET + 6] = rng.uniform(0.0, 0.2)        # temporal_encoding (start weak)
+    genes[EMERGENCE_OFFSET + 7] = rng.uniform(0.0, 0.5)        # composition_depth (start low)
+    genes[EMERGENCE_OFFSET + 8] = rng.uniform(0.0, 0.2)        # counterfactual_weight (start weak)
+    genes[EMERGENCE_OFFSET + 9] = rng.uniform(0.0, 0.3)        # norm_inheritance (start low)
+
     nn_start = FIXED_GENE_COUNT
     genes[nn_start:] = rng.standard_normal(max_nn_params) * 0.3
 
@@ -218,6 +247,8 @@ def get_trait(genome: np.ndarray, name: str) -> float:
         idx, lo, hi = META_LOCI[name]
     elif name in COGNITIVE_LOCI:
         idx, lo, hi = COGNITIVE_LOCI[name]
+    elif name in EMERGENCE_LOCI:
+        idx, lo, hi = EMERGENCE_LOCI[name]
     else:
         raise KeyError(f"Unknown trait: {name}")
     return float(np.clip(genome[idx], lo, hi))
@@ -243,6 +274,10 @@ def get_cognitive_genes(genome: np.ndarray) -> np.ndarray:
     return genome[COGNITIVE_OFFSET:COGNITIVE_OFFSET + COGNITIVE_COUNT]
 
 
+def get_emergence_genes(genome: np.ndarray) -> np.ndarray:
+    return genome[EMERGENCE_OFFSET:EMERGENCE_OFFSET + EMERGENCE_COUNT]
+
+
 def get_concept_genes(genome: np.ndarray) -> np.ndarray:
     return genome[CONCEPT_OFFSET:CONCEPT_OFFSET + CONCEPT_COUNT]
 
@@ -265,4 +300,6 @@ def clamp_genome(genome: np.ndarray):
     for name, (idx, lo, hi) in META_LOCI.items():
         genome[idx] = np.clip(genome[idx], lo, hi)
     for name, (idx, lo, hi) in COGNITIVE_LOCI.items():
+        genome[idx] = np.clip(genome[idx], lo, hi)
+    for name, (idx, lo, hi) in EMERGENCE_LOCI.items():
         genome[idx] = np.clip(genome[idx], lo, hi)

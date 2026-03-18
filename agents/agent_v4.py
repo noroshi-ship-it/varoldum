@@ -19,6 +19,8 @@ from agents.theory_of_mind import TheoryOfMindSystem
 from agents.episodic_memory import EpisodicMemorySystem
 from agents.naming import NamingSystem
 from agents.goal_system import GoalSystem
+from agents.concept_workspace import ConceptWorkspace
+from agents.norm_system import NormSystem
 from agents.genome import (
     get_trait, get_nn_weights, get_arch_genes, get_morph_genes,
     get_concept_genes, random_genome, FIXED_GENE_COUNT
@@ -188,6 +190,27 @@ class Agent:
             bottleneck_size=self.bottleneck_size,
             action_dim=cfg.action_dim,
         )
+
+        # Phase 13: Emergence infrastructure
+        workspace_slots = int(round(get_trait(genome, "workspace_slots")))
+        workspace_gate = get_trait(genome, "workspace_gate")
+        self.workspace = ConceptWorkspace(
+            n_slots=workspace_slots,
+            bottleneck_size=self.bottleneck_size,
+            gate_strength=workspace_gate,
+        )
+        self._think_branch_count = max(1, int(round(
+            get_trait(genome, "think_branch_count"))))
+        norm_cap = int(round(get_trait(genome, "norm_capacity")))
+        norm_sens = get_trait(genome, "norm_sensitivity")
+        norm_inh = get_trait(genome, "norm_inheritance")
+        self.norms = NormSystem(
+            capacity=norm_cap, bottleneck_size=self.bottleneck_size,
+            sensitivity=norm_sens, inheritance_rate=norm_inh,
+        )
+        self.naming.abstract_capacity = int(round(get_trait(genome, "abstract_naming")))
+        self._temporal_encoding = get_trait(genome, "temporal_encoding")
+        self.grammar.temporal_encoding = self._temporal_encoding
 
         # Phase 5: Society engine
         inv_capacity = int(round(get_trait(genome, "inventory_capacity")))
@@ -398,6 +421,25 @@ class Agent:
         # Phase 12: Goal context
         goal_vec = self.goals.get_goal_context(max_dim=6)
 
+        # Phase 13: Workspace context
+        workspace_vec = self.workspace.get_context_vector(concepts_for_query, max_dim=6)
+
+        # Phase 13: Norm context
+        norm_vec = self.norms.get_context_vector(max_dim=4)
+
+        # Phase 13: Temporal context (derived from episodic memory)
+        temporal_vec = np.zeros(2, dtype=np.float64)
+        if self._temporal_encoding > 0.3 and self.episodic.episodes:
+            last_tick = max(ep.tick for ep in self.episodic.episodes)
+            recency = float(np.exp(-0.01 * max(0, self.ticks_alive - last_tick)))
+            temporal_vec[0] = recency
+            if len(self.episodic.episodes) >= 3:
+                ticks = sorted(ep.tick for ep in self.episodic.episodes)
+                intervals = np.diff(ticks).astype(np.float64)
+                if len(intervals) > 1:
+                    temporal_vec[1] = 1.0 / (1.0 + float(np.std(intervals) / (np.mean(intervals) + 1e-8)))
+        self._temporal_context = temporal_vec
+
         self._context = np.concatenate([
             self.body.get_proprioception(),
             self.internal.as_vector(),
@@ -413,6 +455,9 @@ class Agent:
             episodic_vec,  # 8 dims: episodic memory context
             referent_vec,  # 4 dims: naming/referent context
             goal_vec,      # 6 dims: goal context
+            workspace_vec, # 6 dims: workspace context (Phase 13)
+            norm_vec,      # 4 dims: norm context (Phase 13)
+            temporal_vec,  # 2 dims: temporal context (Phase 13)
         ])
         return self._context
 
@@ -453,6 +498,8 @@ class Agent:
         self._action, self._value, self._think_steps_used = self.brain.think(
             self._raw_input, self._context,
             depth_gate_threshold=self.depth_gate_threshold,
+            branch_count=self._think_branch_count,
+            workspace=self.workspace,
         )
 
         concepts = self.brain.get_concepts()
@@ -529,7 +576,8 @@ class Agent:
             token_utterance = self.grammar.encode_structured(
                 concepts_for_utt, signal_raw, self.discrete_vocab,
                 referent_token=referent_token,
-                referential_weight=self.naming.referential_weight)
+                referential_weight=self.naming.referential_weight,
+                temporal_context=getattr(self, '_temporal_context', None))
         if token_utterance is None:
             # Fallback to flat encoding
             token_utterance = self.discrete_vocab.encode_utterance(concepts, signal_raw)
@@ -671,6 +719,23 @@ class Agent:
         if self.goals.check_and_clear_completion():
             reward += 0.5
 
+        # === Phase 13: Norm evaluation ===
+        norm_modulation = self.norms.evaluate(concepts_now)
+        reward += norm_modulation
+        self.norms.learn_from_outcome(concepts_now, reward)
+        if self.ticks_alive % 100 == 0:
+            self.norms.decay()
+
+        # === Phase 13: Abstract naming ===
+        if self.naming.abstract_capacity > 0 and self.ticks_alive % 30 == 0:
+            emotional_sal = float(np.sum(np.abs(self.internal.as_vector() - 0.5)))
+            if self.naming.should_mint_abstract(concepts_now, emotional_sal):
+                used_tokens = set(b.token_id for b in self.naming.name_registry.values())
+                for tid in range(self.discrete_vocab.vocab_active):
+                    if tid not in used_tokens:
+                        self.naming.mint_abstract_name(tid, concepts_now, self.ticks_alive)
+                        break
+
         # === DAYDREAM / INSPIRATION ===
         # Curiosity + boredom drives aimless imagination.
         # Low surprise = world is predictable = boring = time to daydream.
@@ -769,7 +834,10 @@ class Agent:
         episodic_cost = self.episodic.capacity * 0.00005
         naming_cost = self.naming.capacity * 0.00002
         goal_cost = self.goals.max_depth * 0.0003
-        brain_cost += meta_cost + tom_cost + episodic_cost + naming_cost + goal_cost
+        workspace_cost = self.workspace.n_slots * 0.0003
+        norm_cost = self.norms.capacity * 0.0001
+        branch_cost = max(0, self._think_branch_count - 1) * self._cfg.think_energy_cost * self._think_steps_used
+        brain_cost += meta_cost + tom_cost + episodic_cost + naming_cost + goal_cost + workspace_cost + norm_cost + branch_cost
         morph_cost = self.morphology.total_metabolic_cost
         think_cost = self._think_steps_used * self._cfg.think_energy_cost
 
@@ -966,6 +1034,25 @@ class Agent:
     def inherit_goals_template(self, parent_agent, rng):
         """Inherit goal-setting tendencies (no active goals, just parameters already in genome)."""
         pass  # Goal system parameters are gene-controlled, no learned state to inherit
+
+    def inherit_workspace(self, parent_agent, rng):
+        """Inherit workspace contents from parent (compressed)."""
+        if parent_agent.workspace.n_slots == 0 or self.workspace.n_slots == 0:
+            return
+        n = min(self.workspace.n_slots, parent_agent.workspace.n_slots)
+        bn = min(self.workspace.bottleneck_size, parent_agent.workspace.bottleneck_size)
+        for i in range(n):
+            self.workspace.slots[i, :bn] = parent_agent.workspace.slots[i, :bn] * 0.5
+            if rng.random() < 0.2:
+                self.workspace.slots[i] += rng.normal(
+                    0, 0.1, size=self.workspace.bottleneck_size).astype(np.float32)
+
+    def inherit_norms(self, parent_agent, rng):
+        """Inherit norms from parent with mutation."""
+        if parent_agent.norms.capacity == 0 or self.norms.capacity == 0:
+            return
+        mutation_rate = get_trait(self.genome, "mutation_rate")
+        self.norms.inherit_from(parent_agent.norms.norms, rng, mutation_rate)
 
     @property
     def is_alive(self):

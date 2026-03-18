@@ -98,6 +98,9 @@ class Config:
             + 8   # episodic memory context
             + 4   # naming/referent context
             + 6   # goal context
+            + 6   # workspace context (Phase 13)
+            + 4   # norm context (Phase 13)
+            + 2   # temporal context (Phase 13)
         )
 
     @property

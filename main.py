@@ -1076,6 +1076,14 @@ def main():
                     mean_episodic = float(np.mean([a.episodic.episode_count for a in alive]))
                     mean_names = float(np.mean([a.naming.named_count for a in alive]))
                     mean_goals = float(np.mean([1.0 if a.goals.has_active_goal else 0.0 for a in alive]))
+                    # Phase 13: Emergence metrics
+                    mean_workspace = float(np.mean([a.workspace.n_slots for a in alive]))
+                    mean_branches = float(np.mean([a._think_branch_count for a in alive]))
+                    mean_norms = float(np.mean([len(a.norms.norms) for a in alive]))
+                    mean_abstract = float(np.mean([
+                        sum(1 for b in a.naming.name_registry.values() if b.entity_type == "abstract")
+                        for a in alive]))
+                    mean_temporal = float(np.mean([a._temporal_encoding for a in alive]))
                     logger.log_dict("language_analysis", tick, {
                         "mean_grammar_weight": mean_gw,
                         "mean_role_differentiation": mean_diff,
@@ -1084,6 +1092,11 @@ def main():
                         "mean_episodic_count": mean_episodic,
                         "mean_named_entities": mean_names,
                         "mean_has_goal": mean_goals,
+                        "mean_workspace_slots": mean_workspace,
+                        "mean_think_branches": mean_branches,
+                        "mean_norms": mean_norms,
+                        "mean_abstract_names": mean_abstract,
+                        "mean_temporal_encoding": mean_temporal,
                         "pop_size": len(alive),
                     })
 
