@@ -16,7 +16,7 @@ class Config:
     initial_population: int = 200
     max_population: int = 2000
     base_metabolic_rate: float = 0.003
-    brain_metabolic_cost: float = 0.000003
+    brain_metabolic_cost: float = 0.000001
     stm_capacity: int = 8
     ltm_capacity: int = 32
     max_sensor_range: int = 8

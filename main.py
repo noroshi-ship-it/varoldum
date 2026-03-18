@@ -253,6 +253,17 @@ def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng, ec
             else:
                 child = reproduce_asexual(agent, cfg, evo_rng)
             if child is not None and len(agents) + len(new_agents) < cfg.max_population:
+                # Disaster-zone mutagenesis: offspring born in danger get extra mutations
+                # Creates diversity bursts after catastrophes — like radiation evolution
+                danger = env.disasters.get_total_damage(agent.x, agent.y)
+                if danger > 0.1:
+                    from agents.genome import LOCI, ARCH_OFFSET
+                    mr_idx = LOCI["mutation_rate"][0]
+                    child.genome[mr_idx] += danger * 0.5  # temporary mutation boost
+                    # Also nudge architecture genes toward exploration
+                    for ai in range(1, 5):
+                        if evo_rng.random() < danger:
+                            child.genome[ARCH_OFFSET + ai] += evo_rng.normal(0, danger * 30)
                 new_agents.append(child)
 
         # === PARENTAL CARE: physics — proximity + youth ===
@@ -297,25 +308,25 @@ def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng, ec
         disaster_dmg = 0.0
         if disasters is not None:
             dd = disasters.get_disaster_damage(x, y)
-            # Earthquake: direct structural damage
+            # Earthquake: direct structural damage — LETHAL near epicenter
             if dd["earthquake"] > 0.05:
-                eq_dmg = dd["earthquake"] * 0.3
+                eq_dmg = dd["earthquake"] * 0.5
                 agent.body.take_damage(eq_dmg)
                 disaster_dmg += eq_dmg
-            # Flood: drowning damage (scales with flood level)
+            # Flood: drowning damage — severe
             if dd["flood"] > 0.03:
-                fl_dmg = dd["flood"] * 0.2
+                fl_dmg = dd["flood"] * 0.4
                 agent.body.take_damage(fl_dmg)
-                agent.body.energy -= dd["flood"] * 0.05  # energy drain from struggling
+                agent.body.energy -= dd["flood"] * 0.1
                 disaster_dmg += fl_dmg
             # Drought: slow starvation (energy drain, not health)
             if dd["drought"] > 0.1:
-                agent.body.energy -= dd["drought"] * 0.01
-            # Plague: sickness damage
+                agent.body.energy -= dd["drought"] * 0.03
+            # Plague: sickness — energy + health drain
             if dd["plague"] > 0.05:
-                pl_dmg = dd["plague"] * 0.08
+                pl_dmg = dd["plague"] * 0.15
                 agent.body.take_damage(pl_dmg)
-                agent.body.energy -= dd["plague"] * 0.03  # sickness drains energy
+                agent.body.energy -= dd["plague"] * 0.05
                 disaster_dmg += pl_dmg
             data["disaster_damage"] = disaster_dmg
 
@@ -546,6 +557,25 @@ def main():
                 speaker._pending_social_reward += 0.1
                 agent._pending_positive_interaction += 0.2
                 agent._pending_social_reward += 0.05
+
+        # Disaster communication reward: sharing warnings saves lives
+        # Agents who hear tokens in disaster zones get survival bonus,
+        # speakers who warned get large reward — makes communication evolutionary useful
+        for agent in agents:
+            if not agent.is_alive or agent._heard_tokens is None:
+                continue
+            x, y = agent.x, agent.y
+            warnings = env.disasters.get_disaster_warnings(x, y)
+            danger_level = warnings["tremor"] + warnings["flood"] + warnings["drought"] + warnings["plague"]
+            if danger_level > 0.3:
+                # Listener heard warning in danger zone → survival bonus
+                agent.body.energy += min(0.02, danger_level * 0.03)
+                agent._pending_positive_interaction += 0.5
+                # Speaker gets major reward for warning others
+                speaker = agent_by_id.get(agent._heard_tokens.sender_id)
+                if speaker is not None:
+                    speaker._pending_social_reward += danger_level * 0.5
+                    speaker._pending_positive_interaction += 1.0
 
         if tick % 5 == 0:
             culture.process_teaching(agents, tick, agent_rng, lineage_memory=lineage_memory, actions=actions)

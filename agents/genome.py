@@ -7,7 +7,7 @@ LOCI = {
     "sensor_cone_width":     (1, 0.5, 3.14),
     "body_size":             (2, 0.5, 2.0),
     "max_lifespan_factor":   (3, 0.5, 2.0),
-    "mutation_rate":          (4, 0.01, 0.2),
+    "mutation_rate":          (4, 0.03, 0.2),
     "learning_rate":          (5, 0.001, 0.1),
     "hunger_sensitivity":     (6, 0.1, 2.0),
     "fear_sensitivity":       (7, 0.1, 2.0),

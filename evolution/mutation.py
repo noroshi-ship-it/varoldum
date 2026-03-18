@@ -19,12 +19,12 @@ def mutate(genome: np.ndarray, rng: np.random.Generator) -> np.ndarray:
             child[i] += rng.normal(0, mutation_rate)
 
     for i in range(ARCH_COUNT):
-        if rng.random() < 0.15:
+        if rng.random() < 0.25:  # more frequent arch mutations
             idx = ARCH_OFFSET + i
             if i == 0:
-                child[idx] += rng.choice([-1, 0, 0, 0, 1])
+                child[idx] += rng.choice([-1, 0, 0, 1])
             else:
-                child[idx] += rng.normal(0, mutation_rate * 8)
+                child[idx] += rng.normal(0, mutation_rate * 16)  # bigger jumps in layer sizes
 
     for i in range(MORPH_COUNT):
         if rng.random() < 0.3:

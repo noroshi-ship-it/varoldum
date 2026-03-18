@@ -131,11 +131,11 @@ class DisasterSystem:
         Smart agents learn: tremor_warning high → move away from area.
         """
         # Random tremor generation (precursor)
-        if self._rng.random() < 0.03:  # ~3% per 10 ticks
+        if self._rng.random() < 0.10:  # ~10% per 10 ticks — frequent tremors
             cx = self._rng.integers(0, self.w)
             cy = self._rng.integers(0, self.h)
             radius = self._rng.integers(10, 30)
-            intensity = self._rng.uniform(0.2, 0.6)
+            intensity = self._rng.uniform(0.3, 0.8)
 
             for dx in range(-radius, radius + 1):
                 for dy in range(-radius, radius + 1):
@@ -151,13 +151,13 @@ class DisasterSystem:
 
         # When tremor warning accumulates enough → actual earthquake
         max_tremor = np.max(self.tremor_warning)
-        if max_tremor > 0.7 and self._rng.random() < 0.15:
+        if max_tremor > 0.5 and self._rng.random() < 0.25:
             # Find epicenter
             epicenter = np.unravel_index(np.argmax(self.tremor_warning),
                                          self.tremor_warning.shape)
             cx, cy = epicenter
-            magnitude = self._rng.uniform(0.4, 1.0)
-            radius = int(8 + magnitude * 15)
+            magnitude = self._rng.uniform(0.6, 1.0)
+            radius = int(12 + magnitude * 20)
 
             for dx in range(-radius, radius + 1):
                 for dy in range(-radius, radius + 1):
@@ -166,7 +166,7 @@ class DisasterSystem:
                         x = (cx + dx) % self.w
                         y = (cy + dy) % self.h
                         falloff = 1.0 - np.sqrt(dist2) / radius
-                        dmg = magnitude * falloff * 0.4
+                        dmg = magnitude * falloff * 0.7
                         self.earthquake_damage[x, y] = max(
                             self.earthquake_damage[x, y], dmg
                         )
@@ -187,11 +187,11 @@ class DisasterSystem:
         Smart agents learn: flood_warning + low ground → move to high ground.
         """
         # Random flood event
-        if self._rng.random() < 0.008:  # ~every 625 ticks
+        if self._rng.random() < 0.025:  # ~every 200 ticks — frequent floods
             cx = self._rng.integers(0, self.w)
             cy = self._rng.integers(0, self.h)
             radius = self._rng.integers(15, 35)
-            severity = self._rng.uniform(0.3, 0.8)
+            severity = self._rng.uniform(0.5, 1.0)
             duration = self._rng.integers(30, 80)
             self._active_floods.append({
                 "cx": cx, "cy": cy, "radius": radius,
@@ -235,7 +235,7 @@ class DisasterSystem:
                             x = (cx + dx) % self.w
                             y = (cy + dy) % self.h
                             falloff = 1.0 - np.sqrt(dist2) / r
-                            flood_dmg = sev * falloff * 0.15
+                            flood_dmg = sev * falloff * 0.3
                             self.flood_level[x, y] = max(
                                 self.flood_level[x, y], flood_dmg
                             )
@@ -257,7 +257,7 @@ class DisasterSystem:
 
         if not self._drought_active:
             # Higher chance during harsh season
-            if self._rng.random() < 0.0003 + 0.001 * season_harsh:
+            if self._rng.random() < 0.001 + 0.003 * season_harsh:
                 self._drought_active = True
                 self._drought_remaining = self._rng.integers(100, 300)
                 self.drought_warning = 0.3  # initial warning
@@ -271,7 +271,7 @@ class DisasterSystem:
             self.drought_severity[:] = drought_factor * 0.3
 
             # Globally reduce resource growth
-            self._grid.cells[:, :, 0] *= (1.0 - drought_factor * 0.02)
+            self._grid.cells[:, :, 0] *= (1.0 - drought_factor * 0.05)
 
             if self._drought_remaining <= 0:
                 self._drought_active = False
@@ -287,7 +287,7 @@ class DisasterSystem:
         Smart agents learn: plague_warning → avoid crowds, isolate.
         """
         # Spontaneous plague outbreak in dense areas
-        if self._rng.random() < 0.01:
+        if self._rng.random() < 0.04:  # 4x more plague attempts
             cx = self._rng.integers(0, self.w)
             cy = self._rng.integers(0, self.h)
             # Check if area has agents (use agent grid channel)
@@ -302,7 +302,7 @@ class DisasterSystem:
 
             # Only spawn plague in dense areas
             if agent_density > 3:
-                virulence = self._rng.uniform(0.2, 0.6)
+                virulence = self._rng.uniform(0.4, 0.9)
                 spread_radius = self._rng.integers(8, 20)
                 for dx in range(-spread_radius, spread_radius + 1):
                     for dy in range(-spread_radius, spread_radius + 1):
