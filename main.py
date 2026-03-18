@@ -81,15 +81,22 @@ _spatial = SpatialHash(cell_size=8)
 
 
 def find_mate(agent, agents, cfg):
+    """Sexual selection: prefer smarter mates.
+    Doesn't pick the first nearby — picks the smartest nearby."""
     nearby = _spatial.query(agent.body.position[0], agent.body.position[1], 3.0)
+    best_mate = None
+    best_intel = -1.0
     for other in nearby:
         if other.id == agent.id or not other.can_reproduce():
             continue
         dist = toroidal_distance(agent.body.position, other.body.position,
                                  cfg.world_width, cfg.world_height)
         if dist < 3.0:
-            return other
-    return None
+            intel = getattr(other.brain, 'cumulative_wm_accuracy', 0.0)
+            if intel > best_intel:
+                best_intel = intel
+                best_mate = other
+    return best_mate
 
 
 def count_nearby(agent, agents, radius=4):
@@ -117,12 +124,17 @@ def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng, ec
     new_agents = []
     agent_data = {}
 
-    # Count absorbers per cell for cooperative foraging bonus
-    mouth_cells = {}
+    # Count absorbers per cell + track intelligence for competitive foraging
+    mouth_cells = {}       # cell -> count of eaters
+    cell_intel_total = {}  # cell -> sum of intelligence scores of all eaters
+    cell_intel_map = {}    # (cell, agent_id) -> agent's intelligence score
     for agent, action in zip(agents, actions):
         if agent.is_alive and action.get("mouth", 0) > 0:
             cell_key = (agent.x, agent.y)
             mouth_cells[cell_key] = mouth_cells.get(cell_key, 0) + 1
+            intel = 0.3 + getattr(agent.brain, 'cumulative_wm_accuracy', 0.0)
+            cell_intel_total[cell_key] = cell_intel_total.get(cell_key, 0.0) + intel
+            cell_intel_map[(cell_key, agent.id)] = intel
 
     # Parental care map
     parent_positions = {}
@@ -176,11 +188,18 @@ def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng, ec
                 raw_consumed += plant_nut
                 agent.body.take_damage(plant_tox * 0.3)
                 data["damage"] += plant_tox * 0.3
-            # Cooperative foraging
+            # Competitive foraging: when multiple agents eat at same cell,
+            # food is split proportional to intelligence. Smarter = bigger share.
             n_eaters = mouth_cells.get((x, y), 1)
-            raw_consumed *= 1.0 + 0.15 * max(0, n_eaters - 1)
-            # Intelligence foraging bonus: smarter agents extract more food
-            # floor 0.4 so dumb agents don't instantly starve, ceiling 1.5
+            if n_eaters > 1:
+                my_intel = cell_intel_map.get(((x, y), agent.id), 0.3)
+                total_intel = cell_intel_total.get((x, y), my_intel)
+                # My share of the food, weighted by intelligence
+                intel_share = my_intel / max(0.01, total_intel)
+                # Scale: solo=1.0, competing=proportional to smarts
+                # Small cooperation bonus still exists but intelligence dominates
+                raw_consumed *= intel_share * n_eaters * (1.0 + 0.1 * (n_eaters - 1))
+            # Intelligence foraging bonus on top: smarter brains extract more
             wm_acc = getattr(agent.brain, 'cumulative_wm_accuracy', 0.0)
             intel_bonus = 0.4 + 1.1 * wm_acc  # range [0.4, 1.5]
             consumed = raw_consumed * intel_bonus
@@ -596,6 +615,58 @@ def main():
                 if speaker is not None:
                     speaker._pending_social_reward += danger_level * 0.5
                     speaker._pending_positive_interaction += 1.0
+
+        # === DECEPTION & LIE DETECTION ===
+        # Agents who signal in resource-poor areas are effectively lying ("food here!")
+        # Smart listeners detect the lie and distrust the speaker
+        # Dumb listeners get lured and waste energy — speaker profits
+        for agent in agents:
+            if not agent.is_alive or agent._heard_tokens is None:
+                continue
+            speaker = agent_by_id.get(agent._heard_tokens.sender_id)
+            if speaker is None or speaker.id == agent.id:
+                continue
+
+            sx, sy = speaker.x, speaker.y
+            speaker_food = grid.cells[sx % cfg.world_width, sy % cfg.world_height, 0]
+            speaker_danger = 0.0
+            if env.disasters:
+                dd = env.disasters.get_disaster_damage(sx, sy)
+                speaker_danger = dd["earthquake"] + dd["flood"] + dd["plague"]
+
+            # Deceptive signal: speaker is in a bad spot but broadcasting
+            # (low food OR high danger at speaker's location)
+            deception_score = max(0, 0.3 - speaker_food) + speaker_danger
+            if deception_score > 0.15:
+                # Listener's intelligence determines if they detect the lie
+                listener_intel = getattr(agent.brain, 'cumulative_wm_accuracy', 0.0)
+                speaker_intel = getattr(speaker.brain, 'cumulative_wm_accuracy', 0.0)
+
+                # Trust check: do I trust this speaker?
+                trust = 0.5
+                if hasattr(agent, 'trust_memory'):
+                    trust = agent.trust_memory.get_trust(speaker.id)
+
+                # Detection = listener intelligence + distrust of speaker
+                detection = listener_intel * 0.6 + (1.0 - trust) * 0.4
+                # Deception success = speaker cunning vs listener detection
+                deception_success = speaker_intel * 0.7 - detection
+
+                if deception_success > 0:
+                    # Listener got fooled — wastes energy moving toward bad spot
+                    energy_loss = min(0.02, deception_score * 0.03)
+                    agent.body.energy -= energy_loss
+                    # Speaker profits from deception
+                    speaker.body.energy += energy_loss * 0.5
+                    speaker._pending_social_reward += deception_score * 0.3
+                    agent._pending_negative_interaction += 0.5
+                else:
+                    # Listener detected the lie — trust drops, listener gets wisdom bonus
+                    if hasattr(agent, 'trust_memory'):
+                        agent.trust_memory.update_trust(speaker.id, -0.4, tick)
+                    # Detecting lies rewards intelligence
+                    agent._pending_positive_interaction += 0.3
+                    agent._pending_social_reward += 0.1
 
         # Disaster flee reward: agents who move AWAY from danger get rewarded
         # This creates a learnable gradient: warning → flee → survive → reward

@@ -121,7 +121,21 @@ class SocialSystem:
                 elif social_force < 0:
                     take_force = -social_force * proximity  # positive magnitude
                     size_ratio = agent.body.size / max(0.01, other.body.size)
-                    take_force *= min(size_ratio, 2.0)
+
+                    # Intelligence determines theft success, not just size
+                    # Smarter thief outmaneuvers, smarter victim anticipates
+                    my_intel = getattr(agent.brain, 'cumulative_wm_accuracy', 0.0)
+                    their_intel = getattr(other.brain, 'cumulative_wm_accuracy', 0.0)
+                    intel_ratio = (0.3 + my_intel) / max(0.1, 0.3 + their_intel)
+                    # Combined: size matters some, intelligence matters more
+                    combined_ratio = 0.3 * min(size_ratio, 2.0) + 0.7 * min(intel_ratio, 2.5)
+                    take_force *= combined_ratio
+
+                    # Victim's trust memory: if they remember this thief, they resist better
+                    if hasattr(other, 'trust_memory'):
+                        victim_trust = other.trust_memory.get_trust(agent.id)
+                        if victim_trust < 0.3:  # already distrusts this agent
+                            take_force *= 0.4  # much harder to steal from wary victim
 
                     if take_force > 0.01:
                         stolen = take_force * 0.2 * other.body.energy
@@ -131,9 +145,10 @@ class SocialSystem:
                             other.body.energy -= stolen
                             agent.body.energy += stolen * THEFT_EFFICIENCY
 
-                        # Retaliation damage
-                        attacker_damage = take_force * MAX_COMBAT_DAMAGE * RETALIATION_FACTOR / max(0.3, size_ratio)
-                        defender_damage = take_force * MAX_COMBAT_DAMAGE * min(size_ratio, 2.0)
+                        # Retaliation: smarter victims hit back harder
+                        defense_intel = 0.5 + their_intel
+                        attacker_damage = take_force * MAX_COMBAT_DAMAGE * RETALIATION_FACTOR * defense_intel / max(0.3, size_ratio)
+                        defender_damage = take_force * MAX_COMBAT_DAMAGE * combined_ratio * 0.5
                         agent.body.take_damage(attacker_damage)
                         other.body.take_damage(defender_damage)
 
