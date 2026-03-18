@@ -122,9 +122,14 @@ class CultureSystem:
                                 teacher.generation, tick,
                             )
 
-                    # Teacher social satisfaction
+                    # Teacher gets major reward — teaching is the highest-value social act
                     if hasattr(teacher, '_pending_social_reward'):
-                        teacher._pending_social_reward += 0.2
+                        teacher._pending_social_reward += 0.8
+                    # Direct energy reward: teaching lineages survive better
+                    teacher.body.energy = min(1.0, teacher.body.energy + 0.03)
+                    # Student also benefits from learning
+                    if hasattr(student, '_pending_social_reward'):
+                        student._pending_social_reward += 0.3
 
                     break  # one student per teacher per tick
 
@@ -148,7 +153,7 @@ class CultureSystem:
             curiosity = agent.internal.curiosity if hasattr(agent, 'internal') else 0.5
             study_drive = youth * curiosity
 
-            if rng.random() > study_drive * 0.05:
+            if rng.random() > study_drive * 0.15:  # 3x more likely to study
                 continue
 
             rule_data = lineage_memory.study(agent.lineage_id, rng)
@@ -175,7 +180,7 @@ class CultureSystem:
 
             # Social need drives imitation: lonely/uncertain agents learn from others
             social_need = agent.internal.social_need if hasattr(agent, 'internal') else 0.5
-            imitation_drive = social_need * 0.03
+            imitation_drive = social_need * 0.10  # 3x stronger imitation drive
             if rng.random() > imitation_drive:
                 continue
 

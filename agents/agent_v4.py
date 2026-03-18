@@ -548,7 +548,7 @@ class Agent:
         if structure_built:
             reward += 0.5
         if teaching_done:
-            reward += 0.3
+            reward += 1.5  # massive teaching reward — cultural transmission is survival
 
         reward += self.self_model.surprise * self._cfg.exploration_bonus_scale * self.internal.curiosity
 

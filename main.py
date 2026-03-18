@@ -165,18 +165,25 @@ def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng, ec
             # mouth is raw [-1,1], positive half = absorb intensity
             absorb = mouth  # 0 to 1
 
-            # Food absorption
-            consumed = grid.consume_resource(x, y, amount=absorb * 0.3)
+            # Food absorption — intelligence-gated foraging
+            # Base extraction is low; world-model accuracy multiplies yield
+            # This creates direct selection pressure for smarter brains
+            raw_consumed = grid.consume_resource(x, y, amount=absorb * 0.3)
             farm_bonus = structures.get_farm_bonus(x, y)
-            consumed *= (1.0 + farm_bonus)
+            raw_consumed *= (1.0 + farm_bonus)
             if ecology is not None:
                 plant_nut, plant_tox = ecology.consume_plants(x, y, amount=absorb * 0.1)
-                consumed += plant_nut
+                raw_consumed += plant_nut
                 agent.body.take_damage(plant_tox * 0.3)
                 data["damage"] += plant_tox * 0.3
             # Cooperative foraging
             n_eaters = mouth_cells.get((x, y), 1)
-            consumed *= 1.0 + 0.15 * max(0, n_eaters - 1)
+            raw_consumed *= 1.0 + 0.15 * max(0, n_eaters - 1)
+            # Intelligence foraging bonus: smarter agents extract more food
+            # floor 0.4 so dumb agents don't instantly starve, ceiling 1.5
+            wm_acc = getattr(agent.brain, 'cumulative_wm_accuracy', 0.0)
+            intel_bonus = 0.4 + 1.1 * wm_acc  # range [0.4, 1.5]
+            consumed = raw_consumed * intel_bonus
             agent.body.eat(consumed)
             data["energy_gained"] = consumed
 
@@ -589,6 +596,24 @@ def main():
                 if speaker is not None:
                     speaker._pending_social_reward += danger_level * 0.5
                     speaker._pending_positive_interaction += 1.0
+
+        # Disaster flee reward: agents who move AWAY from danger get rewarded
+        # This creates a learnable gradient: warning → flee → survive → reward
+        for agent in agents:
+            if not agent.is_alive:
+                continue
+            x, y = agent.x, agent.y
+            warnings = env.disasters.get_disaster_warnings(x, y)
+            danger_here = warnings["tremor"] + warnings["flood"] + warnings["drought"] + warnings["plague"]
+            if danger_here > 0.2 and agent.body.speed > 0.3:
+                # Agent is moving fast in a danger zone — reward fleeing
+                agent.body.energy += min(0.01, danger_here * 0.015)
+                agent._pending_positive_interaction += danger_here * 0.3
+            elif danger_here < 0.05 and hasattr(agent, '_was_in_danger') and agent._was_in_danger:
+                # Agent escaped from danger zone — big reward
+                agent.body.energy += 0.02
+                agent._pending_social_reward += 0.3
+            agent._was_in_danger = danger_here > 0.2
 
         if tick % 5 == 0:
             culture.process_teaching(agents, tick, agent_rng, lineage_memory=lineage_memory, actions=actions)
