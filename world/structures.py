@@ -57,13 +57,13 @@ class Structure:
     __slots__ = ['stype', 'x', 'y', 'builder_lineage', 'age', 'durability',
                  'stored_resource', 'signal_value', 'inscriptions']
 
-    def __init__(self, stype: int, x: int, y: int, builder_lineage: int):
+    def __init__(self, stype: int, x: int, y: int, builder_lineage: int, builder_wm: float = 0.0):
         self.stype = stype
         self.x = x
         self.y = y
         self.builder_lineage = builder_lineage
         self.age = 0
-        self.durability = DURABILITY.get(stype, 1000)
+        self.durability = int(DURABILITY.get(stype, 1000) * (1.0 + builder_wm))
         self.stored_resource = 0.0
         self.signal_value = 0.0
         self.inscriptions: list[Inscription] = []
@@ -79,14 +79,14 @@ class StructureManager:
         self.total_built = 0
         self.total_destroyed = 0
 
-    def build(self, stype: int, x: int, y: int, builder_lineage: int) -> bool:
+    def build(self, stype: int, x: int, y: int, builder_lineage: int, builder_wm: float = 0.0) -> bool:
         x, y = x % self.w, y % self.h
         if self.grid[x, y] != StructureType.NONE:
             return False
         if stype <= 0 or stype >= StructureType.NUM_TYPES:
             return False
 
-        s = Structure(stype, x, y, builder_lineage)
+        s = Structure(stype, x, y, builder_lineage, builder_wm=builder_wm)
         self.structures[(x, y)] = s
         self.grid[x, y] = stype
         self.total_built += 1
@@ -142,10 +142,10 @@ class StructureManager:
             return 0.15
         return 0.0
 
-    def get_farm_bonus(self, x: int, y: int) -> float:
+    def get_farm_bonus(self, x: int, y: int, wm_accuracy: float = 0.0) -> float:
         s = self.get_at(x, y)
         if s and s.stype == StructureType.FARM:
-            return 0.3
+            return 0.15 + 0.35 * wm_accuracy
         return 0.0
 
     def get_nest_bonus(self, x: int, y: int) -> bool:

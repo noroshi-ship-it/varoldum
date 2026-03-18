@@ -44,7 +44,10 @@ class Sensors:
             cell_data = grid.get_cell(cx, cy)
             base = ray_idx * self.channels
 
-            sensor_vec[base + 0] += cell_data[CH_RESOURCE] * weight
+            resource_val = cell_data[CH_RESOURCE]
+            if hasattr(grid, 'camouflaged') and grid.camouflaged[cx, cy] and dist > 1.5:
+                resource_val = 0.0
+            sensor_vec[base + 0] += resource_val * weight
             sensor_vec[base + 1] += cell_data[CH_HAZARD] * weight
             sensor_vec[base + 2] += cell_data[CH_AGENT] * weight
             sensor_vec[base + 3] += cell_data[CH_SIGNAL] * weight

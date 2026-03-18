@@ -226,6 +226,19 @@ class Ecology:
         x, y = x % self.w, y % self.h
         self.dead_matter[x, y] = min(1.0, self.dead_matter[x, y] + amount)
 
+    def regime_shift(self, rng, tick):
+        """Phase 15: Shift plant nutritive/toxicity — invalidates cached knowledge."""
+        if self.n_plants < 2:
+            return
+        sp_a, sp_b = rng.choice(self.n_plants, size=2, replace=False)
+        drift = 0.3
+        nut_a, nut_b = self.plant_props[sp_a, 1], self.plant_props[sp_b, 1]
+        tox_a, tox_b = self.plant_props[sp_a, 2], self.plant_props[sp_b, 2]
+        self.plant_props[sp_a, 1] = nut_a * (1 - drift) + nut_b * drift
+        self.plant_props[sp_b, 1] = nut_b * (1 - drift) + nut_a * drift
+        self.plant_props[sp_a, 2] = tox_a * (1 - drift) + tox_b * drift
+        self.plant_props[sp_b, 2] = tox_b * (1 - drift) + tox_a * drift
+
     def get_plant_density(self, x, y):
         """Total plant density at position."""
         return float(np.sum(self.plants[x % self.w, y % self.h]))

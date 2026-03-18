@@ -3,6 +3,7 @@ import sys
 import os
 import time
 import argparse
+import math
 import numpy as np
 from collections import Counter
 
@@ -185,7 +186,8 @@ def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng, ec
             # Base extraction is low; world-model accuracy multiplies yield
             # This creates direct selection pressure for smarter brains
             raw_consumed = grid.consume_resource(x, y, amount=absorb * 0.3)
-            farm_bonus = structures.get_farm_bonus(x, y)
+            wm_farm = getattr(agent.brain, 'cumulative_wm_accuracy', 0.0)
+            farm_bonus = structures.get_farm_bonus(x, y, wm_accuracy=wm_farm)
             raw_consumed *= (1.0 + farm_bonus)
             if ecology is not None:
                 plant_nut, plant_tox = ecology.consume_plants(x, y, amount=absorb * 0.1)
@@ -205,15 +207,26 @@ def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng, ec
                 synergy = min(synergy, 1.0 + gbs * 1.0)
                 raw_consumed *= intel_share * n_eaters * synergy
             else:
-                # Phase 14: Rich resource solo penalty — dense patches resist solo extraction
+                # Phase 14+15: Rich resource solo penalty + sequential extraction bonus
                 resource_density = grid.cells[x, y, 0]
-                if resource_density > 0.7:
-                    gbs = getattr(agent, '_group_benefit_sensitivity', 0.0)
-                    solo_penalty = max(0.2, 0.6 - 0.15 * gbs)
-                    raw_consumed *= solo_penalty
+                if resource_density > 0.7 and n_eaters <= 1:
+                    # Phase 15: Processed nutritive substance → extraction bonus
+                    has_processed = False
+                    if physics is not None:
+                        top_ids, top_concs = physics.chemistry.get_top_substances(x, y, n=1)
+                        if (len(top_concs) > 0 and top_concs[0] > 0.1
+                                and physics.chemistry.get_nutritive_value(int(top_ids[0])) > 0.4):
+                            has_processed = True
+                    if has_processed:
+                        raw_consumed *= 2.5  # processed extraction bonus
+                    else:
+                        gbs = getattr(agent, '_group_benefit_sensitivity', 0.0)
+                        solo_penalty = max(0.2, 0.6 - 0.15 * gbs)
+                        raw_consumed *= solo_penalty
             # Intelligence foraging bonus on top: smarter brains extract more
             wm_acc = getattr(agent.brain, 'cumulative_wm_accuracy', 0.0)
-            intel_bonus = 0.4 + 1.1 * wm_acc  # range [0.4, 1.5]
+            # Phase 15: Sigmoid cognitive gate — sharp threshold at wm≈0.35
+            intel_bonus = 0.15 + 1.35 / (1.0 + math.exp(-8.0 * (wm_acc - 0.35)))
             consumed = raw_consumed * intel_bonus
             agent.body.eat(consumed)
             data["energy_gained"] = consumed
@@ -259,13 +272,14 @@ def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng, ec
 
             # CONTEXT: enough energy → build structure
             # manipulate intensity as probability (physics: effort → chance)
-            if evo_rng.random() < manipulate * 0.05:
+            wm_build = getattr(agent.brain, 'cumulative_wm_accuracy', 0.0)
+            if wm_build >= 0.3 and evo_rng.random() < manipulate * 0.05:
                 # Structure type from movement pattern (emergent)
                 pattern = action["move_dx"] + action["move_dy"] * 2
                 stype = int(abs(pattern * 3) % 6) + 1
                 cost = BUILD_COST.get(stype, 0.15)
                 if agent.body.energy > cost:
-                    if structures.build(stype, x, y, agent.lineage_id):
+                    if structures.build(stype, x, y, agent.lineage_id, builder_wm=wm_build):
                         agent.body.energy -= cost
                         data["structure_built"] = True
 
@@ -288,9 +302,11 @@ def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng, ec
         social = action.get("social", 0)
         if social > 0 and mouth > 0 and agent.can_reproduce():
             mate = find_mate(agent, agents, cfg)
+            child = None
+            # Phase 15: Sexual reproduction cheaper, asexual expensive
             if mate is not None:
                 child = reproduce_sexual(agent, mate, cfg, evo_rng)
-            else:
+            elif agent.body.energy > cfg.reproduction_threshold * 1.3:
                 child = reproduce_asexual(agent, cfg, evo_rng)
             if child is not None and len(agents) + len(new_agents) < cfg.max_population:
                 # Disaster-zone mutagenesis: offspring born in danger get extra mutations
@@ -518,6 +534,12 @@ def main():
         physics.update(tick, env.season_phase, grid.cells)
         ecology.update(tick, physics.temperature, physics.terrain.water, env.light_level,
                        soil_ph=physics.hidden.soil_ph)
+        # Phase 15: Regime shifts — invalidate cached plant knowledge
+        if tick > 0 and tick % 500 == 0:
+            ecology.regime_shift(evo_rng, tick)
+        # Phase 15: Refresh camouflaged resources
+        if tick > 0 and tick % 300 == 0:
+            grid.refresh_camouflage(evo_rng)
         structures.update(tick)
         grid.clear_agent_layer()
         for agent in agents:

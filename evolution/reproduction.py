@@ -45,8 +45,10 @@ def reproduce_asexual(
     child.lineage_id = parent.lineage_id
     child.body.init_genetic_frailty(rng)
 
-    parent.body.energy -= cfg.reproduction_cost
-    child.body.energy = cfg.reproduction_cost * 0.7
+    # Phase 15: Asexual is expensive (emergency backup)
+    asexual_cost = cfg.reproduction_cost * 1.2
+    parent.body.energy -= asexual_cost
+    child.body.energy = asexual_cost * 0.6
 
     parent.children_count += 1
     return child
@@ -93,10 +95,11 @@ def reproduce_sexual(
     child.lineage_id = parent_a.lineage_id if parent_a.generation >= parent_b.generation else parent_b.lineage_id
     child.body.init_genetic_frailty(rng)
 
-    cost = cfg.reproduction_cost * 0.6
+    # Phase 15: Sexual is cheaper (primary reproduction path)
+    cost = cfg.reproduction_cost * 0.5
     parent_a.body.energy -= cost
     parent_b.body.energy -= cost
-    child.body.energy = cost * 1.2
+    child.body.energy = cost * 1.3
 
     parent_a.children_count += 1
     parent_b.children_count += 1

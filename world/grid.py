@@ -19,6 +19,8 @@ class Grid:
         self._cfg = cfg
 
         self._seed_resources()
+        self.camouflaged = np.zeros((self.w, self.h), dtype=np.bool_)
+        self._init_camouflage()
 
     def _seed_resources(self):
         n_clusters = max(1, (self.w * self.h) // 200)
@@ -88,6 +90,19 @@ class Grid:
         self.cells[x % self.w, y % self.h, CH_HAZARD] = min(
             1.0, self.cells[x % self.w, y % self.h, CH_HAZARD] + intensity
         )
+
+    def _init_camouflage(self):
+        resource = self.cells[:, :, CH_RESOURCE]
+        mask = (resource > 0.3) & (self._rng.random((self.w, self.h)) < 0.15)
+        self.camouflaged = mask
+        self.cells[mask, CH_RESOURCE] = np.minimum(1.0, self.cells[mask, CH_RESOURCE] * 1.5)
+
+    def refresh_camouflage(self, rng):
+        self.camouflaged[:] = False
+        resource = self.cells[:, :, CH_RESOURCE]
+        mask = (resource > 0.3) & (rng.random((self.w, self.h)) < 0.15)
+        self.camouflaged = mask
+        self.cells[mask, CH_RESOURCE] = np.minimum(1.0, self.cells[mask, CH_RESOURCE] * 1.5)
 
     def consume_resource(self, x: int, y: int, amount: float = 0.3) -> float:
         available = self.cells[x % self.w, y % self.h, CH_RESOURCE]

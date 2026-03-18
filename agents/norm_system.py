@@ -54,11 +54,12 @@ class NormSystem:
 
         modulation = 0.0
         for norm in self.norms:
-            p = norm.pattern[:n]
+            plen = min(n, len(norm.pattern))
+            p = norm.pattern[:plen]
             p_norm = np.linalg.norm(p)
             if p_norm < 1e-8:
                 continue
-            similarity = float(np.dot(c_unit, p / p_norm))
+            similarity = float(np.dot(c_unit[:plen], p / p_norm))
             if similarity > threshold:
                 firing = (similarity - threshold) / (1.0 - threshold + 1e-8)
                 modulation += norm.valence * norm.strength * firing
