@@ -255,7 +255,7 @@ def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng, ec
             if child is not None and len(agents) + len(new_agents) < cfg.max_population:
                 # Disaster-zone mutagenesis: offspring born in danger get extra mutations
                 # Creates diversity bursts after catastrophes — like radiation evolution
-                danger = env.disasters.get_total_damage(agent.x, agent.y)
+                danger = disasters.get_total_damage(agent.x, agent.y) if disasters else 0.0
                 if danger > 0.1:
                     from agents.genome import LOCI, ARCH_OFFSET
                     mr_idx = LOCI["mutation_rate"][0]
