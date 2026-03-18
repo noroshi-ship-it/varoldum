@@ -285,6 +285,15 @@ class Body:
         """Eat a specific substance — adds directly to body composition."""
         if 0 <= substance_idx < MAX_BODY_SUBSTANCES:
             self.composition[substance_idx] += amount * 0.8
+            # Cap energy at 1.0 by trimming excess nutritive composition
+            current_energy = float(np.dot(self.composition, self._nutr))
+            if current_energy > 1.0:
+                excess = current_energy - 1.0
+                # Remove excess from the substance we just added
+                if self._nutr[substance_idx] > 0.01:
+                    trim = excess / self._nutr[substance_idx]
+                    self.composition[substance_idx] = max(
+                        0, self.composition[substance_idx] - trim)
             # Prevent unbounded growth
             np.clip(self.composition, 0, 5.0, out=self.composition)
 

@@ -78,7 +78,7 @@ class Agent:
         self.think_steps = int(np.clip(round(concept_genes[1]), 0, 8))
 
         extra_sensor = self.morphology.extra_sensor_dim
-        context_dim = cfg.context_dim + cfg.internal_state_dim + extra_sensor
+        context_dim = cfg.context_dim + extra_sensor
 
         self.brain = BottleneckBrain(
             raw_input_dim=RAW_INPUT_DIM,
@@ -1193,7 +1193,7 @@ class Agent:
         max_arch = np.array([4, 256, 256, 128, 64, 128])
         max_concept = np.array([32, 8, 0.05])
         extra = 9  # max extra_sensor_dim from morphology
-        context_dim = cfg.context_dim + cfg.internal_state_dim + extra
+        context_dim = cfg.context_dim + extra
         brain = BottleneckBrain(RAW_INPUT_DIM, context_dim, cfg.action_dim,
                                 max_arch, max_concept)
         return brain.policy_param_count

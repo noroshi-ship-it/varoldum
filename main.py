@@ -601,10 +601,13 @@ def main():
         env.update(tick)
         physics.update(tick, env.season_phase, grid.cells)
 
-        # Fix 1: Apply per-cell resource growth modifier from physics (temperature + fertility)
-        temp_factor = np.maximum(0.1, 1.0 - 2.0 * np.abs(physics.temperature - 0.55))
-        rgm = temp_factor * physics.fertility
-        grid.cells[:, :, 0] *= (0.5 + 0.5 * rgm)
+        # Per-cell resource growth modifier: scale growth rate by temperature + fertility
+        # Applied as modifier to the growth step, not multiplicative suppression on total
+        if tick % 4 == 0:
+            temp_factor = np.maximum(0.1, 1.0 - 2.0 * np.abs(physics.temperature - 0.55))
+            rgm = np.clip(temp_factor * physics.fertility, 0.1, 2.0)
+            grid.cells[:, :, 0] += 0.002 * rgm * (1.0 - grid.cells[:, :, 0])
+            np.clip(grid.cells[:, :, 0], 0, 1, out=grid.cells[:, :, 0])
 
         ecology.update(tick, physics.temperature, physics.terrain.water, env.light_level,
                        soil_ph=physics.hidden.soil_ph)
