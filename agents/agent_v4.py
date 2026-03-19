@@ -82,7 +82,7 @@ class Agent:
         self.memory = MemorySystem(stm_cap, ltm_cap, entry_dim, cfg.memory_summary_dim)
 
         concept_genes = get_concept_genes(genome)
-        self.bottleneck_size = int(np.clip(round(concept_genes[0]), 2, 128))  # Phase 16: up from 16
+        self.bottleneck_size = cfg.bottleneck_size  # Fixed for all agents — variable size caused dimension crashes
         self.think_steps = int(np.clip(round(concept_genes[1]), 0, 8))
 
         extra_sensor = self.morphology.extra_sensor_dim
@@ -94,6 +94,7 @@ class Agent:
             action_dim=cfg.action_dim,
             arch_genes=get_arch_genes(genome),
             concept_genes=concept_genes,
+            fixed_bottleneck=self.bottleneck_size,
         )
 
         sm_input = self.brain.gru_size + cfg.internal_state_dim + cfg.proprioception_dim
@@ -150,7 +151,7 @@ class Agent:
 
         # Phase 6: Meta-concepts
         meta_window = int(round(get_trait(genome, "meta_window")))
-        meta_bn_size = int(round(get_trait(genome, "meta_bottleneck_size")))
+        meta_bn_size = cfg.meta_bottleneck_size  # Fixed for all agents
         meta_wm_lr = get_trait(genome, "meta_wm_lr")
         self.meta_concepts = MetaConceptSystem(
             self.bottleneck_size, meta_window=meta_window,

@@ -34,13 +34,16 @@ def decode_bottleneck_architecture(arch_genes: np.ndarray, concept_genes: np.nda
 class BottleneckBrain:
 
     def __init__(self, raw_input_dim: int, context_dim: int, action_dim: int,
-                 arch_genes: np.ndarray, concept_genes: np.ndarray):
+                 arch_genes: np.ndarray, concept_genes: np.ndarray,
+                 fixed_bottleneck: int | None = None):
         self.raw_input_dim = raw_input_dim
         self.context_dim = context_dim
         self.action_dim = action_dim
 
         arch = decode_bottleneck_architecture(arch_genes, concept_genes)
         self.arch = arch
+        if fixed_bottleneck is not None:
+            arch["bottleneck_size"] = fixed_bottleneck
         self.bottleneck_size = arch["bottleneck_size"]
         self.think_steps = arch["think_steps"]
         self.world_model_lr = arch["world_model_lr"]

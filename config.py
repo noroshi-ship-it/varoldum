@@ -27,6 +27,8 @@ class Config:
     gru_hidden_size: int = 16
     action_dim: int = 6
     self_model_hidden: int = 16
+    bottleneck_size: int = 32
+    meta_bottleneck_size: int = 8
 
     signal_dim: int = 4
     hear_radius: int = 8
