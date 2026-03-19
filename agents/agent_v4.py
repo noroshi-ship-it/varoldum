@@ -1116,7 +1116,8 @@ class Agent:
 
     def inherit_tom(self, parent_agent, rng):
         """Inherit Theory of Mind network weights with mutation."""
-        if (self.tom._hidden_layer.W.shape == parent_agent.tom._hidden_layer.W.shape):
+        if (self.tom._hidden_layer.W.shape == parent_agent.tom._hidden_layer.W.shape
+                and self.tom._output_layer.W.shape == parent_agent.tom._output_layer.W.shape):
             self.tom._hidden_layer.W[:] = parent_agent.tom._hidden_layer.W
             self.tom._hidden_layer.b[:] = parent_agent.tom._hidden_layer.b
             self.tom._output_layer.W[:] = parent_agent.tom._output_layer.W
