@@ -303,6 +303,11 @@ class BottleneckBrain:
             self._wm_update_count += 1
             return
 
+        # Dimension guard — episodic replay can provide different-sized concepts
+        if len(self._last_wm_prediction) != len(new_bottleneck):
+            # Size mismatch (inherited episode or changed bottleneck) — skip learning
+            return
+
         error = self._last_wm_prediction - new_bottleneck
         self.world_prediction_error = float(np.mean(error ** 2))
 
