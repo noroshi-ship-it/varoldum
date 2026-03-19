@@ -194,8 +194,9 @@ class NamingSystem:
             b_norm = np.linalg.norm(binding.concept_signature)
             if b_norm < 1e-8:
                 continue
-            sim = float(np.dot(c_unit[:len(binding.concept_signature)],
-                               binding.concept_signature / b_norm))
+            plen = min(len(c_unit), len(binding.concept_signature))
+            sim = float(np.dot(c_unit[:plen],
+                               binding.concept_signature[:plen] / b_norm))
             if sim > 0.7:
                 return False
         return True
