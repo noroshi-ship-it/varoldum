@@ -23,18 +23,22 @@ class Grid:
         self._init_camouflage()
 
     def _seed_resources(self):
-        n_clusters = max(1, (self.w * self.h) // 200)
+        # Base resource everywhere — no cell starts empty
+        self.cells[:, :, CH_RESOURCE] = self._rng.uniform(0.15, 0.35, (self.w, self.h)).astype(np.float32)
+
+        # Rich clusters on top of the base
+        n_clusters = max(3, (self.w * self.h) // 100)
         for _ in range(n_clusters):
             cx = self._rng.integers(0, self.w)
             cy = self._rng.integers(0, self.h)
-            radius = self._rng.integers(3, 10)
+            radius = self._rng.integers(5, 15)
             for dx in range(-radius, radius + 1):
                 for dy in range(-radius, radius + 1):
                     if dx * dx + dy * dy <= radius * radius:
                         x = (cx + dx) % self.w
                         y = (cy + dy) % self.h
                         self.cells[x, y, CH_RESOURCE] = min(
-                            1.0, self.cells[x, y, CH_RESOURCE] + self._rng.uniform(0.3, 0.8)
+                            1.0, self.cells[x, y, CH_RESOURCE] + self._rng.uniform(0.3, 0.7)
                         )
 
     def get_cell(self, x: int, y: int) -> np.ndarray:
@@ -43,7 +47,13 @@ class Grid:
     def update_resources(self, season_modifier: float = 1.0):
         r = self.cells[:, :, CH_RESOURCE]
         growth = self._cfg.resource_growth_rate * season_modifier
+
+        # Logistic growth for existing resources
         r += growth * r * (1.0 - r)
+
+        # Seed rain: empty/depleted cells slowly regenerate (prevents permanent deserts)
+        seed_rain = 0.003 * season_modifier
+        r += seed_rain * (1.0 - r)
 
         if self._cfg.resource_diffusion > 0:
             d = self._cfg.resource_diffusion

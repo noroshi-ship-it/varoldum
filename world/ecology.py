@@ -45,14 +45,17 @@ class Ecology:
                 self.rng.uniform(0.2, 0.8),     # preferred_temp
             ]
 
-        # Seed initial plant populations
+        # Seed initial plant populations — abundant
         for sp in range(self.n_plants):
-            n_patches = max(3, self.w * self.h // 3000)
+            # Base plant cover everywhere
+            self.plants[:, :, sp] += self.rng.uniform(0.05, 0.15, (self.w, self.h)).astype(np.float32)
+
+            n_patches = max(8, self.w * self.h // 1000)
             for _ in range(n_patches):
                 cx = self.rng.integers(0, self.w)
                 cy = self.rng.integers(0, self.h)
-                r = self.rng.integers(5, 15)
-                intensity = self.rng.uniform(0.1, 0.4)
+                r = self.rng.integers(8, 20)
+                intensity = self.rng.uniform(0.3, 0.7)
                 xs = np.arange(max(0, cx - r), min(self.w, cx + r + 1))
                 ys = np.arange(max(0, cy - r), min(self.h, cy + r + 1))
                 for x in xs:
@@ -71,16 +74,16 @@ class Ecology:
         # Decomposers: slow, not aggressive, small, reproduce moderate
         self.fauna_props[2] = [0.1, 0.0, 0.2, 0.02]
 
-        # Sparse initial herbivores where plants are
+        # Abundant initial herbivores where plants are
         total_plants = np.sum(self.plants, axis=2)
-        self.fauna[:, :, 0] = np.where(total_plants > 0.2, 0.05, 0.0)
+        self.fauna[:, :, 0] = np.where(total_plants > 0.1, 0.2, 0.05)
 
-        # Sparse predators (~5x higher initial density)
-        pred_mask = self.rng.random((self.w, self.h)) < 0.05
-        self.fauna[:, :, 1] = pred_mask.astype(np.float32) * 0.1
+        # Abundant predators — healthy ecosystem needs predators
+        pred_mask = self.rng.random((self.w, self.h)) < 0.15
+        self.fauna[:, :, 1] = pred_mask.astype(np.float32) * 0.25
 
-        # Decomposers everywhere at low density
-        self.fauna[:, :, 2] = 0.01
+        # Decomposers everywhere at moderate density
+        self.fauna[:, :, 2] = 0.05
 
     def update(self, tick, temperature, water, light_level, soil_ph=None):
         """Main ecology update."""

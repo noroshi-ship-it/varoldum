@@ -194,12 +194,12 @@ def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng, ec
             # Food absorption — intelligence-gated foraging
             # Base extraction is low; world-model accuracy multiplies yield
             # This creates direct selection pressure for smarter brains
-            raw_consumed = grid.consume_resource(x, y, amount=absorb * 0.3)
+            raw_consumed = grid.consume_resource(x, y, amount=absorb * 0.5)
             wm_farm = getattr(agent.brain, 'cumulative_wm_accuracy', 0.0)
             farm_bonus = structures.get_farm_bonus(x, y, wm_accuracy=wm_farm)
             raw_consumed *= (1.0 + farm_bonus)
             if ecology is not None:
-                plant_nut, plant_tox = ecology.consume_plants(x, y, amount=absorb * 0.1)
+                plant_nut, plant_tox = ecology.consume_plants(x, y, amount=absorb * 0.25)
                 raw_consumed += plant_nut
                 agent.body.take_damage(plant_tox * 0.3)
                 data["damage"] += plant_tox * 0.3
@@ -216,26 +216,16 @@ def resolve_actions(grid, physics, structures, agents, actions, cfg, evo_rng, ec
                 synergy = min(synergy, 1.0 + gbs * 1.0)
                 raw_consumed *= intel_share * n_eaters * synergy
             else:
-                # Phase 14+15: Rich resource solo penalty + sequential extraction bonus
-                resource_density = grid.cells[x, y, 0]
-                if resource_density > 0.7 and n_eaters <= 1:
-                    # Phase 15: Processed nutritive substance → extraction bonus
-                    has_processed = False
-                    if physics is not None:
-                        top_ids, top_concs = physics.chemistry.get_top_substances(x, y, n=1)
-                        if (len(top_concs) > 0 and top_concs[0] > 0.1
-                                and physics.chemistry.get_nutritive_value(int(top_ids[0])) > 0.4):
-                            has_processed = True
-                    if has_processed:
-                        raw_consumed *= 2.5  # processed extraction bonus
-                    else:
-                        gbs = getattr(agent, '_group_benefit_sensitivity', 0.0)
-                        solo_penalty = max(0.2, 0.6 - 0.15 * gbs)
-                        raw_consumed *= solo_penalty
-            # Intelligence foraging bonus on top: smarter brains extract more
+                # Solo eating: cooperative bonus still possible via processed substances
+                if physics is not None:
+                    top_ids, top_concs = physics.chemistry.get_top_substances(x, y, n=1)
+                    if (len(top_concs) > 0 and top_concs[0] > 0.1
+                            and physics.chemistry.get_nutritive_value(int(top_ids[0])) > 0.4):
+                        raw_consumed *= 1.5  # processed substance bonus
+            # Intelligence foraging bonus: smarter brains extract more
+            # Base 0.5x even with no wm, up to 1.5x with high wm
             wm_acc = getattr(agent.brain, 'cumulative_wm_accuracy', 0.0)
-            # Phase 15: Sigmoid cognitive gate — sharp threshold at wm≈0.35
-            intel_bonus = 0.15 + 1.35 / (1.0 + math.exp(-8.0 * (wm_acc - 0.35)))
+            intel_bonus = 0.5 + 1.0 / (1.0 + math.exp(-6.0 * (wm_acc - 0.4)))
             consumed = raw_consumed * intel_bonus
             # Substance-specific eating: consume actual substances from chemistry
             if physics is not None and consumed > 0:

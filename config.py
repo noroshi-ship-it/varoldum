@@ -6,16 +6,16 @@ from dataclasses import dataclass
 class Config:
     world_width: int = 192
     world_height: int = 192
-    resource_growth_rate: float = 0.06
-    resource_diffusion: float = 0.015
+    resource_growth_rate: float = 0.10
+    resource_diffusion: float = 0.02
     hazard_spread_rate: float = 0.008
     hazard_decay_rate: float = 0.008
     season_period: int = 1000
     catastrophe_probability: float = 0.001
 
-    initial_population: int = 200
-    max_population: int = 2000
-    base_metabolic_rate: float = 0.002
+    initial_population: int = 400
+    max_population: int = 3000
+    base_metabolic_rate: float = 0.0012
     brain_metabolic_cost: float = 0.000001
     stm_capacity: int = 8
     ltm_capacity: int = 32
@@ -31,8 +31,8 @@ class Config:
     signal_dim: int = 4
     hear_radius: int = 8
 
-    reproduction_threshold: float = 0.65
-    reproduction_cost: float = 0.35
+    reproduction_threshold: float = 0.45
+    reproduction_cost: float = 0.25
     maturity_age: int = 40
     base_mutation_rate: float = 0.05
     max_lifespan: int = 1500
