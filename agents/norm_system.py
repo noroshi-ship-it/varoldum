@@ -82,11 +82,13 @@ class NormSystem:
         if c_norm_val > 1e-8:
             c_unit = c / c_norm_val
             for norm in self.norms:
-                p = norm.pattern[:n]
+                # Align dimensions — norm may have been created with different bottleneck
+                plen = min(n, len(norm.pattern))
+                p = norm.pattern[:plen]
                 p_norm = np.linalg.norm(p)
                 if p_norm < 1e-8:
                     continue
-                sim = float(np.dot(c_unit, p / p_norm))
+                sim = float(np.dot(c_unit[:plen], p / p_norm))
                 if sim > 0.3:
                     agreement = 1.0 if (norm.valence * reward > 0) else 0.0
                     norm.accuracy += 0.05 * (agreement - norm.accuracy)
