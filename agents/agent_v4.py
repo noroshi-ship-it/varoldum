@@ -35,6 +35,14 @@ from world.spacetime import AgentSpacetime
 _next_id = 0
 
 
+def _pad4(arr, n=4):
+    """Pad/truncate array to exactly n elements."""
+    out = np.zeros(n, dtype=np.float64)
+    m = min(n, len(arr))
+    out[:m] = arr[:m]
+    return out
+
+
 def _gen_id() -> int:
     global _next_id
     _next_id += 1
@@ -490,7 +498,7 @@ class Agent:
             self._heard_signal * (0.3 + 0.7 * self.listener.accuracy),  # weight by listener accuracy
             self._extra_sensor,
             mortality_vec,
-            heard_meaning[:min(4, len(heard_meaning))],  # first 4 dims of decoded meaning
+            _pad4(heard_meaning),  # first 4 dims of decoded meaning (padded)
             self._disaster_warnings,  # 4 dims: tremor, flood, drought, plague
             meta_vec,   # 16 dims: meta-concepts (padded)
             tom_vec,    # 4 dims: ToM prediction of most-attended other
@@ -513,7 +521,7 @@ class Agent:
             self.kv_memory.get_context_vector(  # 8 dims: KV memory read (Phase 16)
                 self.brain.get_concepts(), max_dim=8),
             self.spacetime.get_context(),  # 4 dims: spacetime context
-            self.symbols.get_composite_embedding()[:min(4, self.bottleneck_size)],  # 4 dims: active symbol context
+            _pad4(self.symbols.get_composite_embedding()),  # 4 dims: active symbol context (padded)
         ])
         return self._context
 
